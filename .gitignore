@@ -73,6 +73,9 @@ web_modules/
 .env
 .env.test
 .env.production
+.env.*
+!.env.example
+.vercel/
 
 # parcel-bundler cache (https://parceljs.org/)
 .cache

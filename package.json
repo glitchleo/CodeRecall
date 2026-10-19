@@ -13,15 +13,27 @@
   "license": "ISC",
   "author": "Leo",
   "type": "module",
-  "main": "index.js",
+  "main": "app.js",
   "scripts": {
     "start": "node backend/src/index.js",
-    "dev": "node --watch backend/src/index.js"
+    "dev": "node scripts/dev.mjs",
+    "dev:api": "node --watch backend/src/index.js",
+    "dev:client": "vite --config frontend/vite.config.js",
+    "build": "vite build --config frontend/vite.config.js",
+    "test": "node --test"
   },
   "dependencies": {
-    "bcrypt": "^6.0.0",
+    "@supabase/supabase-js": "^2.118.0",
     "dotenv": "^18.0.7",
     "express": "^5.3.0",
-    "mongoose": "^9.11.2"
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1"
+  },
+  "private": true,
+  "engines": {
+    "node": ">=22"
+  },
+  "devDependencies": {
+    "vite": "^8.3.4"
   }
 }
