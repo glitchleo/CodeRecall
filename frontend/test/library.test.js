@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import {
   ROOT_ID, createInitialNodes, createItem, renameItem, moveItems, copyItems,
   deleteItems, toggleStar, getChildren, getAncestors, isDescendant,
-  getTopLevelIds, validateStoredNodes,
+  getTopLevelIds, validateStoredNodes, updateFileContent,
 } from "../src/lib/library.js";
 
 const byId = (nodes, id) => nodes.find((node) => node.id === id);
@@ -33,7 +33,9 @@ test("creation permits arbitrary folder nesting and empty text files with unique
   const withFile = createItem(withFolder, { parentId: folder.id, type: "file" });
   assert.equal(withFile.at(-1).name, "Untitled.txt");
   assert.equal(withFile.at(-1).parentId, folder.id);
-  assert.equal("content" in withFile.at(-1), false);
+  assert.equal(withFile.at(-1).content, "");
+  assert.equal(withFile.at(-1).sizeBytes, 0);
+  assert.equal("content" in folder, false);
   const duplicate = createItem(nodes, { parentId: "folder", type: "file", name: "draft.TXT" });
   assert.equal(duplicate.at(-1).name, "draft (2).TXT");
   assert.equal(nodes.length, 2);
@@ -138,6 +140,92 @@ test("star toggles immutably", () => {
   assert.equal(nodes[0].starred, false);
   assert.equal(toggleStar(starred, "file")[0].starred, false);
   assert.throws(() => toggleStar(nodes, ROOT_ID), /root/i);
+});
+
+test("editing file content updates UTF-8 size and modified time without changing metadata or other nodes", () => {
+  const nodes = freeze([
+    item("folder", "Snippets"),
+    { ...item("file", "hello.py", "file", "folder"), starred: true },
+    item("other", "other.js", "file"),
+  ]);
+  const before = Date.now();
+  const updated = updateFileContent(nodes, "file", "aé😀\n");
+  const after = Date.now();
+  const file = byId(updated, "file");
+  assert.notEqual(updated, nodes);
+  assert.notEqual(file, byId(nodes, "file"));
+  assert.equal(updated[0], nodes[0]);
+  assert.equal(updated[2], nodes[2]);
+  assert.equal(file.content, "aé😀\n");
+  assert.equal(file.sizeBytes, 8);
+  assert.ok(Date.parse(file.updatedAt) >= before && Date.parse(file.updatedAt) <= after);
+  assert.deepEqual(
+    { ...file, content: undefined, sizeBytes: undefined, updatedAt: timestamp },
+    { ...nodes[1], content: undefined, sizeBytes: undefined },
+  );
+  assert.equal("content" in nodes[1], false);
+  assert.equal(validateStoredNodes(updated), true);
+});
+
+test("unchanged content retains the snapshot and timestamp, including legacy empty files", () => {
+  const legacy = freeze([item("file", "empty.js", "file")]);
+  assert.equal(updateFileContent(legacy, "file", ""), legacy);
+  const current = freeze([{ ...item("file", "text.js", "file"), content: "hello", sizeBytes: 5 }]);
+  assert.equal(updateFileContent(current, "file", "hello"), current);
+  assert.equal(current[0].updatedAt, timestamp);
+  const empty = updateFileContent(current, "file", "");
+  assert.equal(empty[0].content, "");
+  assert.equal(empty[0].sizeBytes, 0);
+});
+
+test("editing rejects non-files, missing IDs, and non-string content without mutation", () => {
+  const nodes = freeze([item("folder", "Folder"), item("file", "file.py", "file")]);
+  assert.throws(() => updateFileContent(nodes, ROOT_ID, "text"), /root/i);
+  assert.throws(() => updateFileContent(nodes, "missing", "text"), /no longer exists/i);
+  assert.throws(() => updateFileContent(nodes, "folder", "text"), /choose a file/i);
+  for (const content of [undefined, null, 42, {}, [], new String("text")]) {
+    assert.throws(() => updateFileContent(nodes, "file", content), /must be text/i);
+  }
+  assert.equal("content" in nodes[1], false);
+});
+
+test("copied snippet trees keep their content and can be edited independently through library operations", () => {
+  const nodes = freeze([
+    item("folder", "Snippets"), item("destination", "Destination"),
+    { ...item("file", "hello.py", "file", "folder"), content: "print('Hi')\n", sizeBytes: 12 },
+  ]);
+  const copied = copyItems(nodes, ["folder"], "destination");
+  const copyFolder = getChildren(copied, "destination")[0];
+  const copyFile = getChildren(copied, copyFolder.id)[0];
+  assert.equal(copyFile.content, nodes[2].content);
+  assert.equal(copyFile.sizeBytes, nodes[2].sizeBytes);
+  const edited = updateFileContent(copied, copyFile.id, "print('Changed')\n");
+  assert.equal(byId(edited, "file").content, "print('Hi')\n");
+  assert.equal(byId(copied, copyFile.id).content, "print('Hi')\n");
+  const renamed = renameItem(edited, copyFile.id, "changed.py");
+  const moved = moveItems(renamed, [copyFile.id], ROOT_ID);
+  assert.equal(byId(moved, copyFile.id).content, "print('Changed')\n");
+  assert.equal(byId(moved, copyFile.id).sizeBytes, 17);
+  assert.equal(byId(moved, copyFile.id).parentId, ROOT_ID);
+  const deleted = deleteItems(moved, [copyFile.id]);
+  assert.equal(byId(deleted, copyFile.id), undefined);
+  assert.equal(byId(moved, copyFile.id).content, "print('Changed')\n");
+  assert.equal(validateStoredNodes(moved), true);
+});
+
+test("stored files accept legacy snapshots and validate optional content and size fields", () => {
+  const legacy = item("file", "legacy.py", "file");
+  assert.equal(validateStoredNodes([legacy]), true);
+  assert.equal(validateStoredNodes([{ ...legacy, content: "" }]), true);
+  assert.equal(validateStoredNodes([{ ...legacy, content: "é", sizeBytes: 2 }]), true);
+  assert.equal(validateStoredNodes([{ ...legacy, sizeBytes: 0 }]), true);
+  for (const content of [undefined, null, 0, [], {}, false]) {
+    assert.equal(validateStoredNodes([{ ...legacy, content }]), false);
+  }
+  for (const sizeBytes of [undefined, null, "1", -1, 0.5, Infinity, NaN]) {
+    assert.equal(validateStoredNodes([{ ...legacy, sizeBytes }]), false);
+  }
+  assert.equal(validateStoredNodes([{ ...item("folder", "Folder"), content: "" }]), false);
 });
 
 test("stored data validation rejects corrupt shapes, orphaned trees, collisions, and cycles", () => {

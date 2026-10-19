@@ -108,7 +108,19 @@ export function createItem(nodes, { parentId = ROOT_ID, type, name } = {}) {
     createdAt: timestamp,
     updatedAt: timestamp,
     starred: false,
+    ...(type === "file" ? { content: "", sizeBytes: 0 } : {}),
   }];
+}
+
+/** Legacy files without content are empty; unchanged text preserves the exact snapshot. */
+export function updateFileContent(nodes, id, content) {
+  const item = requireItem(nodes, id);
+  if (item.type !== "file") throw new Error("Choose a file to edit.");
+  if (typeof content !== "string") throw new Error("File content must be text.");
+  if ((item.content ?? "") === content) return nodes;
+  const updatedAt = new Date().toISOString();
+  const sizeBytes = new TextEncoder().encode(content).byteLength;
+  return nodes.map((node) => node.id === id ? { ...node, content, sizeBytes, updatedAt } : node);
 }
 
 export function renameItem(nodes, id, name) {
@@ -199,6 +211,11 @@ export function validateStoredNodes(value) {
       if (!node || typeof node !== "object" || Array.isArray(node)) return false;
       if (typeof node.id !== "string" || !node.id.trim() || byId.has(node.id)) return false;
       if (!TYPES.has(node.type) || cleanName(node.name) !== node.name || typeof node.starred !== "boolean") return false;
+      if ("content" in node && (node.type !== "file" || typeof node.content !== "string")) return false;
+      if ("tagIds" in node && (node.type !== "file" || !Array.isArray(node.tagIds)
+        || !node.tagIds.every((id) => typeof id === "string" && Boolean(id.trim()))
+        || new Set(node.tagIds).size !== node.tagIds.length)) return false;
+      if (node.type === "file" && "sizeBytes" in node && (!Number.isInteger(node.sizeBytes) || node.sizeBytes < 0)) return false;
       if (node.parentId !== ROOT_ID && typeof node.parentId !== "string") return false;
       if (![node.createdAt, node.updatedAt].every((date) => typeof date === "string" && Number.isFinite(Date.parse(date)))) return false;
       const names = siblingNames.get(node.parentId) ?? new Set();
