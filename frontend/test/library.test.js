@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import {
   ROOT_ID, createInitialNodes, createItem, renameItem, moveItems, copyItems,
   deleteItems, toggleStar, getChildren, getAncestors, isDescendant,
-  getTopLevelIds, validateStoredNodes, updateFileContent,
+  getTopLevelIds, validateStoredNodes, updateFileContent, updateItemMetadata,
 } from "../src/lib/library.js";
 
 const byId = (nodes, id) => nodes.find((node) => node.id === id);
@@ -245,4 +245,43 @@ test("stored data validation rejects corrupt shapes, orphaned trees, collisions,
     [{ ...valid[0], createdAt: "invalid" }], [{ ...valid[0], updatedAt: 123 }],
   ]) assert.equal(validateStoredNodes(invalid), false, JSON.stringify(invalid));
   assert.equal(validateStoredNodes(valid), true);
+});
+
+test("files and folders keep editable descriptions and icon selections through tree operations", () => {
+  const nodes = freeze([
+    item("folder", "Math"), item("destination", "Destination"),
+    { ...item("file", "addition.py", "file", "folder"), content: "a + b", tagIds: ["math"] },
+  ]);
+  const described = updateItemMetadata(nodes, "folder", { description: "  Add and subtract numbers\nArithmetic  ", iconId: "folder_type_math" });
+  assert.equal(described[0].description, "Add and subtract numbers\nArithmetic");
+  assert.equal(described[0].iconId, "folder_type_math");
+  assert.equal(described[1], nodes[1]);
+  assert.equal(described[2], nodes[2]);
+  assert.equal("description" in nodes[0], false);
+  assert.equal(updateItemMetadata(described, "folder", { description: described[0].description }), described);
+  const edited = updateItemMetadata(described, "file", { description: "Add two numbers", iconId: "file_type_python" });
+  assert.equal(edited[2].content, "a + b");
+  assert.deepEqual(edited[2].tagIds, ["math"]);
+  const copied = copyItems(edited, ["folder"], "destination");
+  assert.equal(copied.at(-1).description, "Add two numbers");
+  assert.equal(copied.at(-1).iconId, "file_type_python");
+  assert.equal(validateStoredNodes(copied), true);
+  assert.equal(updateItemMetadata(edited, "file", { iconId: "" })[2].iconId, "");
+});
+
+test("metadata rejects unsafe icon paths, invalid text and excessive descriptions before storage", () => {
+  const nodes = freeze([item("folder", "Folder")]);
+  for (const metadata of [null, [], "text", { content: "overwritten" }, { description: null },
+    { description: "x".repeat(4001) }, { description: "bad\u0000description" },
+    ...[null, 1, "../file_type_python", "https://example.com/icon.svg", "file.svg", "a".repeat(97)].map((iconId) => ({ iconId }))]) {
+    assert.throws(() => updateItemMetadata(nodes, "folder", metadata));
+  }
+  assert.throws(() => updateItemMetadata(nodes, ROOT_ID, {}), /root/i);
+  assert.throws(() => updateItemMetadata(nodes, "missing", {}), /no longer exists/i);
+  assert.equal(updateItemMetadata(nodes, "folder", {}), nodes);
+  for (const extra of [{ description: null }, { description: "x".repeat(4001) },
+    { description: "bad\u0000description" }, { iconId: null }, { iconId: "../x" }, { iconId: "a".repeat(97) }]) {
+    assert.equal(validateStoredNodes([{ ...nodes[0], ...extra }]), false);
+  }
+  assert.equal(validateStoredNodes([{ ...nodes[0], description: "x".repeat(4000), iconId: "file_type_python" }]), true);
 });

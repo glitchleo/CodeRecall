@@ -3,6 +3,11 @@ export const ROOT_ID = null;
 
 const TYPES = new Set(["folder", "file"]);
 const keyForName = (name) => name.toLocaleLowerCase("en-US");
+const MAX_DESCRIPTION_LENGTH = 4000;
+const validDescription = (value) => typeof value === "string" && value.length <= MAX_DESCRIPTION_LENGTH
+  && !/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/u.test(value);
+// Store a catalog key, never a URL or a path supplied by persisted data.
+const validIconId = (value) => typeof value === "string" && (value === "" || /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,95}$/u.test(value));
 
 function cleanName(value) {
   if (typeof value !== "string") throw new Error("Enter a name.");
@@ -123,6 +128,23 @@ export function updateFileContent(nodes, id, content) {
   return nodes.map((node) => node.id === id ? { ...node, content, sizeBytes, updatedAt } : node);
 }
 
+/** Search metadata belongs to folders and files; empty icon IDs restore automatic icons. */
+export function updateItemMetadata(nodes, id, metadata) {
+  const item = requireItem(nodes, id);
+  if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) throw new Error("Enter valid item details.");
+  if (Object.keys(metadata).some((key) => key !== "description" && key !== "iconId")) throw new Error("Choose valid item details.");
+  if ("description" in metadata && !validDescription(metadata.description)) {
+    throw new Error("Descriptions must be text, contain no control characters, and be 4000 characters or fewer.");
+  }
+  if ("iconId" in metadata && !validIconId(metadata.iconId)) throw new Error("Choose a valid icon from the icon library.");
+  const updates = {};
+  if ("description" in metadata) updates.description = metadata.description.trim();
+  if ("iconId" in metadata) updates.iconId = metadata.iconId;
+  if (Object.entries(updates).every(([key, value]) => (item[key] ?? "") === value)) return nodes;
+  const updatedAt = new Date().toISOString();
+  return nodes.map((node) => node.id === id ? { ...node, ...updates, updatedAt } : node);
+}
+
 export function renameItem(nodes, id, name) {
   const item = requireItem(nodes, id);
   const nextName = cleanName(name);
@@ -212,9 +234,11 @@ export function validateStoredNodes(value) {
       if (typeof node.id !== "string" || !node.id.trim() || byId.has(node.id)) return false;
       if (!TYPES.has(node.type) || cleanName(node.name) !== node.name || typeof node.starred !== "boolean") return false;
       if ("content" in node && (node.type !== "file" || typeof node.content !== "string")) return false;
-      if ("tagIds" in node && (node.type !== "file" || !Array.isArray(node.tagIds)
+      if ("tagIds" in node && (!Array.isArray(node.tagIds)
         || !node.tagIds.every((id) => typeof id === "string" && Boolean(id.trim()))
         || new Set(node.tagIds).size !== node.tagIds.length)) return false;
+      if ("description" in node && !validDescription(node.description)) return false;
+      if ("iconId" in node && !validIconId(node.iconId)) return false;
       if (node.type === "file" && "sizeBytes" in node && (!Number.isInteger(node.sizeBytes) || node.sizeBytes < 0)) return false;
       if (node.parentId !== ROOT_ID && typeof node.parentId !== "string") return false;
       if (![node.createdAt, node.updatedAt].every((date) => typeof date === "string" && Number.isFinite(Date.parse(date)))) return false;

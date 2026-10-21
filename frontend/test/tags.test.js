@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   cleanTagName, validateTags, createTag, assignFileTags, decodeLibrary,
-  encodeLibrary, getFileTags, matchesFileSearch, matchesTagFilter,
+  encodeLibrary, getFileTags, matchesFileSearch, matchesTagFilter, assignItemTags, getItemTags,
 } from "../src/lib/tags.js";
 import {
   ROOT_ID, copyItems, deleteItems, moveItems, renameItem, updateFileContent, validateStoredNodes,
@@ -88,12 +88,11 @@ test("assigning and removing tags is immutable, deduplicates selections, and pre
   assert.equal(validateStoredNodes(tagged), true);
 });
 
-test("assigning tags rejects missing files, folders, unknown IDs, and malformed selections before mutation", () => {
+test("assigning tags rejects missing items, unknown IDs, and malformed selections before mutation", () => {
   const nodes = freeze([item("file", "example.py"), item("folder", "Folder", "folder")]);
   const before = JSON.stringify(nodes);
   assert.throws(() => assignFileTags(nodes, "missing", [], catalog), /no longer exists/i);
   assert.throws(() => assignFileTags(nodes, ROOT_ID, [], catalog), /no longer exists/i);
-  assert.throws(() => assignFileTags(nodes, "folder", [], catalog), /choose a file/i);
   assert.throws(() => assignFileTags(nodes, "file", ["python", "unknown"], catalog), /no longer exists/i);
   assert.throws(() => assignFileTags(nodes, "file", [], null), /invalid/i);
   for (const ids of [null, "python", {}, [null], [""], [" "], [1]]) {
@@ -138,7 +137,7 @@ test("stored tag validation rejects orphan IDs, invalid selections, and unsuppor
   }
   assert.equal(validateStoredNodes([{ ...file, tagIds: [] }]), true);
   assert.equal(validateStoredNodes([{ ...file, tagIds: ["python"] }]), true);
-  assert.equal(validateStoredNodes([item("folder", "Folder", "folder", ROOT_ID, { tagIds: [] })]), false);
+  assert.equal(validateStoredNodes([item("folder", "Folder", "folder", ROOT_ID, { tagIds: [] })]), true);
   for (const invalid of [
     null, {}, "[]", 1, { version: 1, nodes: [file], tags: [] },
     { version: 3, nodes: [file], tags: [] }, { version: 2, nodes: [file] },
@@ -198,4 +197,25 @@ test("resolved tags ignore stale references and multiple selected filters requir
   assert.equal(matchesTagFilter(item("empty", "empty.py"), ["python"]), false);
   assert.equal(matchesTagFilter(item("folder", "Folder", "folder"), []), true);
   assert.equal(matchesTagFilter(item("folder", "Folder", "folder"), ["python"]), false);
+});
+
+test("folder tags share the catalog, persist in version 2, and keep compatibility helpers working", () => {
+  const nodes = freeze([
+    item("folder", "Math", "folder", ROOT_ID, { description: "Arithmetic helpers", iconId: "folder_type_math" }),
+    item("file", "addition.py", "file", "folder", { content: "def add(a, b): return a + b" }),
+  ]);
+  const tagged = assignItemTags(nodes, "folder", ["algorithms", "python"], catalog);
+  assert.deepEqual(getItemTags(tagged[0], catalog).map((tag) => tag.id), ["algorithms", "python"]);
+  assert.deepEqual(getFileTags(tagged[0], catalog), getItemTags(tagged[0], catalog));
+  assert.equal(matchesFileSearch(tagged[0], "helpers algorithms", catalog), true);
+  assert.equal(matchesFileSearch(tagged[0], "#python", catalog), true);
+  assert.equal(matchesTagFilter(tagged[0], ["algorithms", "python"]), true);
+  const saved = encodeLibrary(tagged, catalog);
+  assert.equal(saved.version, 2);
+  assert.deepEqual(decodeLibrary(JSON.parse(JSON.stringify(saved))), saved);
+  assert.equal(saved.nodes[1].content, nodes[1].content);
+  assert.equal(saved.nodes[0].description, "Arithmetic helpers");
+  assert.equal(saved.nodes[0].iconId, "folder_type_math");
+  assert.deepEqual(assignFileTags(tagged, "folder", [], catalog)[0].tagIds, []);
+  assert.equal(decodeLibrary({ version: 2, nodes: [{ ...nodes[0], tagIds: ["missing"] }], tags: catalog }), null);
 });

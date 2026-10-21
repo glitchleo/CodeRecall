@@ -54,15 +54,8 @@
 .tag-badge > span { min-width: 0; overflow-wrap: anywhere; }
 .tag-badge > button { display: inline-flex; flex: 0 0 auto; align-items: center; justify-content: center; width: 17px; height: 17px; margin: -1px -4px -1px 0; padding: 0; border-radius: 2px; color: #b3bcc3; }
 .tag-badge > button:hover { color: #fff; background: #46515a; }
-.file-tags-section { display: flex; flex-direction: column; align-items: flex-start; gap: 9px; margin-top: 16px; padding-top: 14px; border-top: 1px solid #353535; }
-.file-tags-section h3, .file-tags-section h4 { margin: 0; color: #aaa; font-size: 11px; font-weight: 400; }
-.file-tags-section > p { margin: 0; color: #999; font-size: 11px; line-height: 1.5; }
-.file-tags-section .tag-picker-trigger { justify-content: flex-start; min-height: 28px; padding-left: 6px; }
 .tag-filter-bar { display: flex; flex: 0 0 auto; flex-wrap: wrap; align-items: center; gap: 6px; min-width: 0; padding: 7px 13px; border-bottom: 1px solid #353535; background: #1e1e1e; }
 .tag-filter-bar > span:first-child { color: #aaa; font-size: 11px; }
-.tag-filter-chip { display: inline-flex; align-items: center; gap: 5px; max-width: 100%; min-height: 24px; padding: 2px 7px; border: 1px solid #465563; border-radius: 3px; color: #bdddff; background: #29353f; font-size: 11px; }
-.tag-filter-chip:hover { background: #364753; }
-.tag-filter-chip > span { overflow-wrap: anywhere; }
 .tag-filter-clear { flex: 0 0 auto; min-height: 24px; padding: 2px 7px; border-radius: 3px; color: #aaa; font-size: 11px; }
 .tag-filter-clear:hover { color: #eee; background: #333; }
 .tag-filter-clear:focus-visible { outline: 1px solid #6bbafa; outline-offset: -2px; }

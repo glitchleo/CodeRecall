@@ -1,38 +1,53 @@
-import test from "node:test";
+import { after, before, test } from "node:test";
 import assert from "node:assert/strict";
+import { once } from "node:events";
 import app from "../../app.js";
 
-test("API health, validation, and error responses", async () => {
-    const server = app.listen(0, "127.0.0.1");
-    await new Promise((resolve) => server.once("listening", resolve));
-    const url = `http://127.0.0.1:${server.address().port}`;
-    try {
-        const health = await fetch(url + "/api/health");
-        assert.equal(health.status, 200);
-        assert.deepEqual(await health.json(), { status: "ok" });
-        assert.equal((await fetch(url + "/missing")).status, 404);
-        for (const route of ["register", "login", "logout"]) {
-            const response = await fetch(url + "/api/v1/users/" + route, {
-                method: "POST", headers: { "Content-Type": "application/json" }, body: "{}",
-            });
-            assert.equal(response.status, 400);
-        }
-        const invalid = await fetch(url + "/api/v1/users/login", {
-            method: "POST", headers: { "Content-Type": "application/json" }, body: "{",
-        });
-        assert.equal(invalid.status, 400);
-        const previous = process.env.SUPABASE_URL;
-        delete process.env.SUPABASE_URL;
-        try {
-            const response = await fetch(url + "/api/v1/users/login", {
-                method: "POST", headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ email: "test@example.com", password: "test-password" }),
-            });
-            assert.equal(response.status, 503);
-        } finally {
-            if (previous !== undefined) process.env.SUPABASE_URL = previous;
-        }
-    } finally {
+let server;
+let url;
+
+before(async () => {
+    server = app.listen(0, "127.0.0.1");
+    await once(server, "listening");
+    url = `http://127.0.0.1:${server.address().port}`;
+});
+
+after(async () => {
+    if (server?.listening) {
         await new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
     }
+});
+
+test("API health responds with JSON and no framework header", async () => {
+    const response = await fetch(url + "/api/health");
+    assert.equal(response.status, 200);
+    assert.match(response.headers.get("content-type"), /^application\/json\b/);
+    assert.equal(response.headers.get("x-powered-by"), null);
+    assert.deepEqual(await response.json(), { status: "ok" });
+});
+
+test("unknown API and non-API routes respond with JSON", async () => {
+    for (const path of ["/api/missing", "/missing"]) {
+        const response = await fetch(url + path);
+        assert.equal(response.status, 404);
+        assert.match(response.headers.get("content-type"), /^application\/json\b/);
+        assert.deepEqual(await response.json(), { message: "Route not found" });
+    }
+});
+
+test("malformed JSON responds with a safe validation error", async () => {
+    const response = await fetch(url + "/api/missing", {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: "{",
+    });
+    assert.equal(response.status, 400);
+    assert.deepEqual(await response.json(), { message: "Invalid request." });
+});
+
+test("JSON exceeding the size limit responds with a safe size error", async () => {
+    const response = await fetch(url + "/api/missing", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: "x".repeat(17 * 1024) }),
+    });
+    assert.equal(response.status, 413);
+    assert.deepEqual(await response.json(), { message: "Request body too large." });
 });

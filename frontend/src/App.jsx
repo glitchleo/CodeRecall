@@ -1,9 +1,13 @@
-import React, { useEffect, useRef, useState } from 'react';
-import { createInitialNodes, createItem, renameItem, moveItems, copyItems, deleteItems, toggleStar, getChildren, getAncestors, isDescendant, updateFileContent } from './lib/library.js';
+import React, { lazy, Suspense, useEffect, useRef, useState } from 'react';
+import { createInitialNodes, createItem, renameItem, moveItems, copyItems, deleteItems, toggleStar, getChildren, getAncestors, isDescendant, updateFileContent, updateItemMetadata } from './lib/library.js';
 import { FILE_KINDS, ROOT_LABEL, getItemType, buildSizeMap, sortItems, formatSize, formatDateTime, makeFileName } from './lib/explorer.js';
 import CodeEditor from './CodeEditor.jsx';
 import TagPicker, { TagBadges } from './TagPicker.jsx';
 import { createTag, assignFileTags, decodeLibrary, encodeLibrary, getFileTags, matchesFileSearch, matchesTagFilter } from './lib/tags.js';
+import ItemIcon from './ItemIcon.jsx';
+import SearchMode, { SearchIcon } from './SearchMode.jsx';
+import MetadataPanel from './MetadataPanel.jsx';
+const CloudLibrary = lazy(() => import('./CloudLibrary.jsx'));
 
 const STORAGE_KEY = 'coderecall.library.v1';
 const PREFERENCES_KEY = 'coderecall.explorer.preferences.v1';
@@ -50,12 +54,6 @@ function Icon({ name, size = 17, ...props }) {
   return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" {...props}>{paths[name] || paths.file}</svg>;
 }
 
-function ItemIcon({ item, size = 18 }) {
-  if (item.type === 'folder') return <span className="item-icon folder-icon" aria-hidden="true"><svg width={size} height={size} viewBox="0 0 24 24"><path fill="#e4ae36" d="M2 5a2 2 0 0 1 2-2h6l3 3h7a2 2 0 0 1 2 2v11H2Z" /><path fill="#ffcf59" d="M2 9h20v11a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1Z" /><path fill="#ffe396" d="M2 8h20v3H2Z" /></svg></span>;
-  const kind = item.name.toLowerCase().endsWith('.py') ? 'python' : item.name.toLowerCase().endsWith('.js') ? 'javascript' : 'text';
-  return <span className={`item-icon ${kind}-icon`} aria-hidden="true"><svg width={size} height={size} viewBox="0 0 24 24" fill="none"><path fill="currentColor" fillOpacity=".12" stroke="currentColor" d="M5 2.5h9l5 5v14H5Z" /><path stroke="currentColor" d="M14 2.5v5h5" />{kind === 'text' ? <path stroke="currentColor" d="M8 11h8M8 14h8M8 17h6" /> : <text x="7" y="17" fontFamily="Segoe UI, sans-serif" fontSize="7.5" fontWeight="700" fill="currentColor">{kind === 'python' ? 'py' : 'JS'}</text>}</svg></span>;
-}
-
 function MenuItem({ icon, children, shortcut, checked, danger, ...props }) {
   return <button role="menuitem" className={danger ? 'danger-menu-item' : undefined} {...props}><Icon name={checked ? 'check' : icon || 'file'} size={16} /><span>{children}</span>{shortcut && <kbd>{shortcut}</kbd>}</button>;
 }
@@ -69,12 +67,13 @@ function loadLibrary() {
 }
 
 function loadPreferences() {
-  const fallback = { sort: { key: 'name', direction: 'asc' }, density: 'normal' };
+  const fallback = { sort: { key: 'name', direction: 'asc' }, density: 'normal', mode: 'find' };
   try {
     const saved = JSON.parse(localStorage.getItem(PREFERENCES_KEY));
     return {
       sort: COLUMNS.some(([key]) => key === saved?.sort?.key) && ['asc', 'desc'].includes(saved.sort.direction) ? saved.sort : fallback.sort,
       density: ['dense', 'normal', 'comfortable'].includes(saved?.density) ? saved.density : fallback.density,
+      mode: ['find', 'explorer'].includes(saved?.mode) ? saved.mode : fallback.mode,
     };
   } catch { return fallback; }
 }
@@ -98,6 +97,7 @@ export default function App() {
   const [storageError, setStorageError] = useState(false);
   const [dropTarget, setDropTarget] = useState(undefined);
   const [detailsOpen, setDetailsOpen] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
   const [editorFileId, setEditorFileId] = useState(null);
   const editorRef = useRef(null);
   const [editingPath, setEditingPath] = useState(false);
@@ -127,7 +127,7 @@ export default function App() {
   const detail = selectedNodes.length === 1 ? selectedNodes[0] : null;
   const editorFile = nodes.find(node => node.id === editorFileId && node.type === 'file');
   const editorPath = editorFile ? `${ROOT_LABEL}\\${[...getAncestors(nodes, editorFile.id), editorFile].map(node => node.name).join('\\')}` : '';
-  const canCreate = !searching;
+  const canCreate = preferences.mode === 'find' || !searching;
   const hasSelection = selectedNodes.length > 0;
 
   useEffect(() => {
@@ -198,8 +198,8 @@ export default function App() {
 
   function toggleFileTag(fileId, tagId) {
     try {
-      const file = nodes.find(node => node.id === fileId && node.type === 'file');
-      if (!file) throw new Error('This file no longer exists.');
+      const file = nodes.find(node => node.id === fileId);
+      if (!file) throw new Error('This item no longer exists.');
       const current = file.tagIds || [];
       const ids = current.includes(tagId) ? current.filter(id => id !== tagId) : [...current, tagId];
       return persistTagChange(assignFileTags(nodes, fileId, ids, tags), tags);
@@ -211,8 +211,8 @@ export default function App() {
       const result = createTag(tags, name);
       let nextNodes = nodes;
       if (fileId !== null) {
-        const file = nodes.find(node => node.id === fileId && node.type === 'file');
-        if (!file) throw new Error('This file no longer exists.');
+        const file = nodes.find(node => node.id === fileId);
+        if (!file) throw new Error('This item no longer exists.');
         nextNodes = assignFileTags(nodes, fileId, [...(file.tagIds || []), result.tag.id], result.tags);
       }
       const saved = persistTagChange(nextNodes, result.tags);
@@ -227,12 +227,28 @@ export default function App() {
     return { ok: true };
   }
 
-  function renderFileTags(file) {
-    const assigned = getFileTags(file, tags);
-    return <section className="file-tags-section" aria-label="File tags"><h3>Tags</h3>
-      {assigned.length ? <TagBadges tags={assigned} /> : <p className="file-tags-empty">No tags assigned.</p>}
-      <TagPicker label="Edit tags" tags={tags} selectedIds={file.tagIds || []} onToggle={id => toggleFileTag(file.id, id)} onCreate={name => createCustomTag(name, file.id)} />
-    </section>;
+  function saveMetadata(id, patch) {
+    try {
+      const next = encodeLibrary(updateItemMetadata(nodes, id, patch), tags);
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+      setLibrary(next); setStorageError(false); setUndo(null);
+      return { ok: true };
+    } catch (err) { return { ok: false, message: `Could not save details. ${err.message}` }; }
+  }
+
+  async function copyCode(item) {
+    try { await navigator.clipboard.writeText(item.content || ''); notify(`Code copied from ${item.name}.`); }
+    catch { notify('Clipboard unavailable. Open the code and select it to copy.'); }
+  }
+
+  function loadCloudLibrary(next) {
+    if (editorFile) throw new Error('Save and close the editor before replacing your library.');
+    const validated = decodeLibrary(next);
+    if (!validated) throw new Error('The downloaded library is invalid.');
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(validated));
+    setLibrary(validated); setHistory({ entries: [null], index: 0 });
+    setSelected([]); setQuery(''); setTagFilter([]); setUndo(null); setClipboard(null); setStorageError(false);
+    notify('Cloud library loaded on this device.');
   }
 
   function undoChange() {
@@ -242,7 +258,8 @@ export default function App() {
   }
 
   function clearTransientState() {
-    setQuery(''); setTagFilter([]); setSelected([]); setMenu(null); setEditingPath(false); selectionAnchor.current = null;
+    if (preferences.mode !== 'find') { setQuery(''); setTagFilter([]); }
+    setSelected([]); setMenu(null); setEditingPath(false); setSidebarOpen(false); selectionAnchor.current = null;
   }
 
   function navigate(id = null) {
@@ -432,7 +449,7 @@ export default function App() {
   useEffect(() => {
     function handleKey(event) {
       if (editorFile) return;
-      if (event.target instanceof Element && event.target.closest('[data-tag-picker]')) return;
+      if (event.target instanceof Element && event.target.closest('[data-tag-picker], [data-metadata], [data-item-viewer], [data-cloud-library], [data-icon-picker]')) return;
       const editable = event.target instanceof HTMLElement && (['INPUT', 'TEXTAREA', 'SELECT'].includes(event.target.tagName) || event.target.isContentEditable);
       const mod = event.ctrlKey || event.metaKey; const key = event.key.toLowerCase();
       if (event.key === 'Escape') {
@@ -444,7 +461,7 @@ export default function App() {
         return;
       }
       if (dialog) return;
-      if (mod && key === 'f') { event.preventDefault(); searchRef.current?.focus(); return; }
+      if (mod && (key === 'f' || key === 'k')) { event.preventDefault(); searchRef.current?.focus(); return; }
       if (event.altKey && key === 'd') { event.preventDefault(); editPath(); return; }
       if (editable || menu) return;
       if (key === '/') { event.preventDefault(); searchRef.current?.focus(); }
@@ -479,8 +496,10 @@ export default function App() {
   }
   if (dialog?.type === 'transfer') collectDestinations();
 
-  return <div className={`app-shell view-${preferences.density}`}>
+  return <div className={`app-shell view-${preferences.density} mode-${preferences.mode}${sidebarOpen ? ' sidebar-visible' : ''}`}>
+    {sidebarOpen && <button className="sidebar-scrim" aria-label="Close navigation" onClick={() => setSidebarOpen(false)} />}
     <aside className="sidebar" aria-label="Explorer navigation">
+      <div className="sidebar-brand"><span className="brand-symbol">{'</>'}</span><span>CodeRecall</span><button className="icon-button sidebar-close" aria-label="Close navigation" onClick={() => setSidebarOpen(false)}><Icon name="close" /></button></div>
       <nav className="roots-section" aria-label="Roots">{ROOTS.map(root => <button key={root.id}
         className={`sidebar-link ${folderId === root.parentId && !searching ? 'active' : ''} ${dropTarget === root.parentId ? 'drop-target' : ''}`}
         onClick={() => navigate(root.parentId)} onDragOver={event => dragOver(event, root.parentId)} onDragLeave={() => setDropTarget(undefined)} onDrop={event => drop(event, root.parentId)}
@@ -501,6 +520,8 @@ export default function App() {
 
     <main className="workspace" aria-label="File explorer">
       {editorFile ? <CodeEditor key={editorFile.id} ref={editorRef} file={editorFile} path={editorPath} persistenceError={storageError} onSave={saveEditorContent} onClose={() => setEditorFileId(null)} tags={tags} onToggleTag={id => toggleFileTag(editorFile.id, id)} onCreateTag={name => createCustomTag(name, editorFile.id)} /> : <>
+      <header className="mode-bar"><button className="icon-button mobile-navigation-toggle" aria-label="Open navigation" aria-expanded={sidebarOpen} onClick={() => setSidebarOpen(value => !value)}><Icon name="list" /></button><div className="mode-switch" aria-label="Library mode"><button className={preferences.mode === 'find' ? 'active' : ''} aria-pressed={preferences.mode === 'find'} onClick={() => setPreferences(previous => ({ ...previous, mode: 'find' }))}><SearchIcon name="grid" size={15} />Find code</button><button className={preferences.mode === 'explorer' ? 'active' : ''} aria-pressed={preferences.mode === 'explorer'} onClick={() => setPreferences(previous => ({ ...previous, mode: 'explorer' }))}><Icon name="list" size={15} />Explorer</button></div><Suspense fallback={<span className="cloud-loading">Account & backup</span>}><CloudLibrary library={library} onLoad={loadCloudLibrary} /></Suspense></header>
+      {preferences.mode === 'find' ? <SearchMode nodes={nodes} tags={tags} query={query} onQuery={setQuery} searchRef={searchRef} tagFilter={tagFilter} onToggleFilter={toggleTagFilter} onCreateTag={createCustomTag} onClearFilters={() => setTagFilter([])} folderId={folderId} breadcrumb={breadcrumb} onNavigate={navigate} onBack={() => goHistory(-1)} canBack={history.index > 0} onEdit={openItem} onCreate={beginCreate} onCopy={copyCode} onSaveMetadata={saveMetadata} onToggleTag={toggleFileTag} storageError={storageError} /> : <>
       <div className="command-bar" role="toolbar" aria-label="File actions">
         <div className="command-group"><button className="toolbar-button" aria-label="New" aria-haspopup="menu" aria-expanded={menu?.kind === 'new'} onClick={event => showToolbarMenu(event, 'new')} disabled={!canCreate}><Icon name="plus" /><span>New</span><Icon name="down" size={11} /></button></div>
         <span className="toolbar-separator" />
@@ -567,10 +588,11 @@ export default function App() {
         </div>
         {detailsOpen && <aside className="details-panel" aria-label="Item details">
           <div className="details-heading"><span>Details</span><button className="icon-button" aria-label="Close details" onClick={() => setDetailsOpen(false)}><Icon name="close" size={16} /></button></div>
-          {detail ? <><div className="details-file-icon"><ItemIcon item={detail} size={48} /></div><h2 className="detail-name">{detail.name}</h2><div className="detail-type">{getItemType(detail)}</div>{detail.type === 'file' && renderFileTags(detail)}<dl className="details-list"><dt>Location</dt><dd>{`${ROOT_LABEL}\\${getAncestors(nodes, detail.id).map(n => n.name).join('\\')}`}</dd><dt>Date created</dt><dd>{formatDateTime(detail.createdAt)}</dd><dt>Date modified</dt><dd>{formatDateTime(detail.updatedAt)}</dd><dt>Size</dt><dd>{formatSize(sizes.get(detail.id) || 0)}</dd>{detail.type === 'folder' && <><dt>Contains</dt><dd>{getChildren(nodes, detail.id).length} items</dd></>}</dl>{detail.type === 'file' && <button className="button secondary details-rename" onClick={() => openItem(detail)}>Edit file</button>}{detail.type === 'folder' && <button className="button secondary" onClick={() => starFolder(detail)}><Icon name="star" size={15} />{detail.starred ? 'Unstar folder' : 'Star folder'}</button>}</> : <p className="editor-note">{selectedNodes.length > 1 ? `${selectedNodes.length} items selected.` : 'Select an item to view its details.'}</p>}
+          {detail ? <><div className="details-file-icon"><ItemIcon item={detail} size={48} /></div><h2 className="detail-name">{detail.name}</h2><div className="detail-type">{getItemType(detail)}</div><MetadataPanel key={detail.id} item={detail} tags={tags} onSave={saveMetadata} onToggleTag={toggleFileTag} onCreateTag={createCustomTag} /><dl className="details-list"><dt>Location</dt><dd>{`${ROOT_LABEL}\\${getAncestors(nodes, detail.id).map(n => n.name).join('\\')}`}</dd><dt>Date created</dt><dd>{formatDateTime(detail.createdAt)}</dd><dt>Date modified</dt><dd>{formatDateTime(detail.updatedAt)}</dd><dt>Size</dt><dd>{formatSize(sizes.get(detail.id) || 0)}</dd>{detail.type === 'folder' && <><dt>Contains</dt><dd>{getChildren(nodes, detail.id).length} items</dd></>}</dl>{detail.type === 'file' && <button className="button secondary details-rename" onClick={() => openItem(detail)}>Edit file</button>}{detail.type === 'folder' && <button className="button secondary" onClick={() => starFolder(detail)}><Icon name="star" size={15} />{detail.starred ? 'Unstar folder' : 'Star folder'}</button>}</> : <p className="editor-note">{selectedNodes.length > 1 ? `${selectedNodes.length} items selected.` : 'Select an item to view its details.'}</p>}
         </aside>}
       </div>
       <footer className="status-bar"><span>{items.length} {items.length === 1 ? 'item' : 'items'}</span>{hasSelection && <><span className="status-separator" /><span>{selectedNodes.length} selected</span></>}<span className={`status-message ${storageError ? 'storage-warning' : ''}`}>{storageError ? 'Storage unavailable — changes saved for this session only' : 'Saved locally'}</span></footer>
+      </>}
       </>}
     </main>
 

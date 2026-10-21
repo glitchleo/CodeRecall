@@ -6,6 +6,7 @@ export default defineConfig(({ mode }) => {
     const apiPort = process.env.PORT || loadEnv(mode, rootDirectory, "").PORT || "8000";
     return {
         root: fileURLToPath(new URL("./", import.meta.url)),
+        envDir: rootDirectory,
         build: {
             outDir: fileURLToPath(new URL("../dist", import.meta.url)),
             emptyOutDir: true,

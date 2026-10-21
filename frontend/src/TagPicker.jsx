@@ -131,6 +131,16 @@ export default function TagPicker({ tags = [], selectedIds = [], onToggle, onCre
       event.preventDefault();
       event.stopPropagation();
       closeMenu();
+    } else if (event.key === 'Tab') {
+      event.stopPropagation();
+      const focusable = [...(menuRef.current?.querySelectorAll('button:not(:disabled), input:not(:disabled), [tabindex="0"]') ?? [])]
+        .filter((node) => node.getClientRects().length);
+      const first = focusable[0], last = focusable.at(-1);
+      const active = document.activeElement;
+      if (!menuRef.current?.contains(active) || (event.shiftKey ? active === first : active === last)) {
+        event.preventDefault();
+        (event.shiftKey ? last : first)?.focus();
+      }
     }
   }
 
@@ -146,7 +156,7 @@ export default function TagPicker({ tags = [], selectedIds = [], onToggle, onCre
       aria-controls={open ? menuId : undefined}
       disabled={disabled}
       onKeyDown={(event) => {
-        if (open && event.key === 'Escape') handleMenuKeyDown(event);
+        if (open) handleMenuKeyDown(event);
       }}
       onClick={() => {
         if (open) closeMenu();

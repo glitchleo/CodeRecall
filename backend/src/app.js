@@ -1,13 +1,11 @@
 import express from "express";
 import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import userRoute from "./routes/user.route.js";
 
 const app = express();
 app.disable("x-powered-by");
 app.use(express.json({ limit: "16kb" }));
 app.get("/api/health", (_req, res) => res.json({ status: "ok" }));
-app.use("/api/v1/users", userRoute);
 app.use("/api", (_req, res) => res.status(404).json({ message: "Route not found" }));
 
 const frontendDirectory = fileURLToPath(new URL("../../dist/", import.meta.url));
@@ -27,6 +25,6 @@ if (existsSync(frontendIndex)) {
 app.use((_req, res) => res.status(404).json({ message: "Route not found" }));
 app.use((error, _req, res, _next) => {
     const status = error.status >= 400 && error.status < 600 ? error.status : 500;
-    res.status(status).json({ message: status === 503 ? "Supabase is not configured." : status === 400 ? "Invalid request." : status === 413 ? "Request body too large." : "Internal server error" });
+    res.status(status).json({ message: status === 400 ? "Invalid request." : status === 413 ? "Request body too large." : "Internal server error" });
 });
 export default app;

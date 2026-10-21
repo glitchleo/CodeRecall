@@ -3,7 +3,7 @@ import { validateStoredNodes } from "./library.js";
 const nameKey = (name) => name.normalize("NFC").toLocaleLowerCase("en-US");
 const validId = (id) => typeof id === "string" && Boolean(id.trim());
 
-/** Tags are user names, separate from their stable IDs and file names. */
+/** Tags are user names, separate from their stable IDs and item names. */
 export function cleanTagName(value) {
   if (typeof value !== "string") throw new Error("Enter a tag name.");
   if (/\p{Cc}/u.test(value)) throw new Error("Tag names cannot contain control characters.");
@@ -45,44 +45,48 @@ export function createTag(tags, requestedName) {
   return { tags: [...tags, tag], tag };
 }
 
-/** Replace one file's tag selection; each selected ID must exist in the catalog. */
-export function assignFileTags(nodes, fileId, selectedIds, tags) {
-  const file = nodes.find((node) => node.id === fileId);
-  if (!file) throw new Error("This file no longer exists.");
-  if (file.type !== "file") throw new Error("Choose a file to tag.");
+/** Replace a folder or file's tags; each selected ID must exist in the catalog. */
+export function assignItemTags(nodes, itemId, selectedIds, tags) {
+  const item = nodes.find((node) => node.id === itemId);
+  if (!item) throw new Error("This item no longer exists.");
+  if (item.type !== "file" && item.type !== "folder") throw new Error("Choose a folder or file to tag.");
   if (!validateTags(tags)) throw new Error("The tag list is invalid.");
   if (!Array.isArray(selectedIds) || !selectedIds.every(validId)) throw new Error("Choose valid tags.");
   const registered = new Set(tags.map((tag) => tag.id));
   const tagIds = [...new Set(selectedIds)];
   if (tagIds.some((id) => !registered.has(id))) throw new Error("One of these tags no longer exists.");
-  const existingIds = file.tagIds ?? [];
+  const existingIds = item.tagIds ?? [];
   if (tagIds.length === existingIds.length && existingIds.every((id) => tagIds.includes(id))) return nodes;
   const updatedAt = new Date().toISOString();
-  return nodes.map((node) => node.id === fileId ? { ...node, tagIds, updatedAt } : node);
+  return nodes.map((node) => node.id === itemId ? { ...node, tagIds, updatedAt } : node);
 }
 
-/** Resolve only registered tags; display remains safe when given a stale file. */
-export function getFileTags(file, tags) {
-  if (file?.type !== "file" || !file.tagIds?.length) return [];
-  const selected = new Set(file.tagIds);
+/** Resolve registered tags for either item type, safely ignoring stale references. */
+export function getItemTags(item, tags) {
+  if ((item?.type !== "file" && item?.type !== "folder") || !item.tagIds?.length) return [];
+  const selected = new Set(item.tagIds);
   return tags.filter((tag) => selected.has(tag.id));
 }
 
-/** A leading # searches tags only. Ordinary searches include names and tags. */
+// Compatibility names used by the original explorer and existing saved libraries.
+export const assignFileTags = assignItemTags;
+export const getFileTags = getItemTags;
+
+/** A leading # searches tags only; all ordinary query terms can span metadata fields. */
 export function matchesFileSearch(node, query, tags) {
   const raw = typeof query === "string" ? query.trim() : "";
   if (!raw) return true;
   const tagOnly = raw.startsWith("#");
   const search = nameKey(tagOnly ? raw.slice(1).trim() : raw);
-  if (!tagOnly && nameKey(node.name).includes(search)) return true;
-  const fileTags = getFileTags(node, tags);
-  return fileTags.some((tag) => nameKey(tag.name).includes(search));
+  const itemTags = getItemTags(node, tags);
+  if (tagOnly && !search) return itemTags.length > 0;
+  const fields = [...(tagOnly ? [] : [node.name, node.description ?? ""]), ...itemTags.map((tag) => tag.name)].map(nameKey);
+  return search.split(/\s+/u).every((term) => fields.some((field) => field.includes(term)));
 }
 
-/** Multiple active filters require every tag; folders remain visible with no filter. */
+/** Multiple active filters require every tag on a folder or file. */
 export function matchesTagFilter(node, selectedIds) {
   if (!selectedIds.length) return true;
-  if (node.type !== "file") return false;
   const assigned = new Set(node.tagIds ?? []);
   return selectedIds.every((id) => assigned.has(id));
 }

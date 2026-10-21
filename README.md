@@ -1,6 +1,6 @@
 # CodeRecall
 
-React library interface with an Express API and optional Supabase authentication. Requires Node.js 22+.
+Personal code library with ranked search, a file explorer, an editor, and optional Supabase accounts/cloud backups. Requires Node.js 22+.
 
 ## Local setup
 
@@ -11,7 +11,19 @@ npm run dev
 
 Open http://127.0.0.1:5173. The frontend and API run together; `/api` requests proxy to the API, which defaults to port 8000 and respects `PORT` in the root `.env` file. Use `npm run dev:client` or `npm run dev:api` to run either separately.
 
-The interface works like a compact file explorer. Its sidebar contains one virtual root, `D:`, and an independently scrollable list of starred folders. This root is browser-local storage; it does not access your computer's actual D: drive. Existing library data is preserved.
+The interface opens in **Find code** mode. Switch to **Explorer** for file organization; your mode choice is remembered. The sidebar contains a virtual root, `D:`, and starred folders. This root does not access your computer's actual D: drive. Existing browser libraries migrate without changing their code.
+
+## Find code
+
+Search by names, descriptions, tags, and ancestor folder context. Words can match across these fields, so `math addition` and `addition math` have identical rankings. Every word must match; exact names and tags carry more weight than descriptions and inherited context. A directly matching **Math** folder appears above files that only inherit its context. Folders containing a matching descendant also appear as navigable results. This is deterministic metadata search, with no AI service, embedding setup, or external search requests.
+
+The grid has four square cards across on desktop, three/two at intermediate widths, and one per row on phones and narrow windows (600px or less). File cards show the beginning of their saved code with a fade; use **Copy code** or **Edit** without opening the full preview. Click a card to read the complete scrollable code with its details on the right, or below on mobile. Folder cards show their top three ranked direct children; a child file opens directly, and a child folder drills down. The query and tag filters stay active while navigating with folders, breadcrumbs, Back, or Up. Inside an opened folder, other children stay available after the best matches so you can keep exploring. Typing a new query searches that scope and its descendants again.
+
+Use the info button on any card, or **Explorer → Details**, to edit descriptions, tags, and icons on files **and folders**. Descriptions save when leaving the field, with a Save button and Ctrl/Cmd+Enter shortcut. Tags and icon choices save immediately. Folder tags and descriptions contribute context to their descendants; selected Find tag filters include this inherited context. `#name` restricts Find searches to tag words. `/`, Ctrl/Cmd+F, and Ctrl/Cmd+K focus search.
+
+The searchable icon picker includes 44 icons from the supplied vscode-icons collection, with automatic language/folder matching and a manual override for every item. Stable icon IDs are stored with the library; SVG assets ship with the app. To extend the collection, see [the icon guide](frontend/public/icons/README.md).
+
+## Explorer and editor
 
 Use **New** to create a folder or an empty Python (`.py`) or JavaScript (`.js`) file. The details table shows name, creation date, modification date, type, and size; click any column heading to sort in either direction. The Sort menu offers the same fields, and View changes row spacing. Existing text files remain supported.
 
@@ -19,37 +31,42 @@ Double-click folders to open them, use the breadcrumb/path bar to navigate, or t
 
 New files open directly in a simple code editor. Double-click an existing file, press Enter on it, or choose **Edit file** from its menu to edit its content. The editor includes undo/redo, line numbers, indentation, word wrap, and cursor position. Save with **Save** or Ctrl/Cmd+S; undo with Ctrl/Cmd+Z and redo with Ctrl/Cmd+Shift+Z or Ctrl+Y. Tab indents, Shift+Tab outdents, and Enter keeps the current indentation.
 
-File contents are saved in the same browser-local library, with UTF-8 byte sizes and updated modification dates. Copies retain their code. Leaving an unsaved file offers Save, Discard, or Cancel; closing or reloading the browser also warns about unsaved changes. Account integration and backend library storage come later. Clearing browser data removes this prototype library.
+File contents are saved in the browser-local library, with UTF-8 byte sizes and updated modification dates. Copies retain their code, descriptions, tags, and icons. Leaving an unsaved file offers Save, Discard, or Cancel; closing or reloading the browser also warns about unsaved changes. Clearing browser data removes the local library and its recovery copy; use JSON or cloud backups to keep another copy.
 
-Use **Tags** in the editor, or select a file and open **Details → Edit tags**, to assign multiple custom tags. Type a name in the tag list and choose **Create** (or press Enter) to create and assign it immediately. Check or uncheck existing tags to reuse or remove assignments. Tag changes save automatically and do not save, discard, or reset an unsaved code draft.
+Use **Tags** in the editor, or select an item and open **Details → Edit tags**, to assign multiple custom tags. Type a name and choose **Create** (or press Enter) to create and assign it immediately. Check or uncheck existing tags to reuse or remove assignments. Tag changes do not reset an unsaved code draft.
 
-Search matches file names and tag names; use `#name` to search tags specifically. **Filter tags** finds files in the current folder and its descendants; selecting multiple tags requires all of them. Remove individual filter chips or choose **Clear tag filters** to return to the normal listing. Copies keep their tags, and existing browser-local libraries migrate without changing their code.
+Explorer's compact search matches item names and their own tags, with `#name` for tags only. Selecting multiple tag filters requires all of them. Use Find mode for relevance ranking, descriptions, folder context, and code previews.
 
 For a production build, run `npm run build`, then `npm start`. Express serves the built interface and API together at http://localhost:8000 (or the configured `PORT`).
 
-Supabase is only needed to use the authentication API. Copy `.env.example` to `.env`, preserving existing values, and set `SUPABASE_URL` and `SUPABASE_PUBLISHABLE_KEY` from your Supabase project. Enable email/password authentication and configure the Site URL and allowed redirect URLs. MONGODB_URI is no longer used.
+## Accounts and backups
+
+**Account & backup** provides local JSON export/import without any account. Imports and cloud downloads require a concrete replacement confirmation and save one previous local library for recovery. Cloud is optional: set the `VITE_SUPABASE_URL` and `VITE_SUPABASE_PUBLISHABLE_KEY` variables and apply the included SQL migrations to enable email/password accounts, profiles, and private cloud snapshots.
+
+Signing in never transfers data automatically. Upload your saved library on one device, then download it on another. Revision checks reject stale uploads rather than silently overwriting a newer snapshot. Cloud snapshots are limited to 4 MiB; no per-file merge or background sync is included. Authentication and library transfers use the Supabase browser SDK directly. Never use a secret/service-role key in browser variables.
+
+Accounts appear under **Supabase → Authentication → Users**. To also see usernames and IDs in **Table Editor → public → profiles**, apply `supabase/migrations/202610210002_profiles.sql`. It backfills existing accounts and adds a trigger for future signups and username changes. Passwords, emails, and tokens stay in Auth. A `library_snapshots` row appears only after uploading a library.
+
+Follow [the detailed Vercel and Supabase setup guide](docs/DEPLOYMENT.md) for the table/RLS migration, email confirmation, environment variables, deployment, phone setup, backups, icons, and troubleshooting.
 
 ## API
 
 | Method | Path | Input |
 | --- | --- | --- |
 | GET | /api/health | Liveness check; does not contact Supabase |
-| POST | /api/v1/users/register | JSON: username, email, password (10+ characters) |
-| POST | /api/v1/users/login | JSON: email, password |
-| POST | /api/v1/users/logout | Authorization: Bearer access_token; JSON: refresh_token |
 
-Registration stores username in Supabase user metadata; it is not unique or an authorization attribute. Supabase handles password storage. With email confirmation enabled, signup returns no session until confirmation. Login returns user and session tokens. The frontend must store and refresh its session (prefer the Supabase client SDK), then remove its tokens on logout. Existing access tokens can remain valid until expiry after logout.
+The unused Express authentication routes were removed; the interface uses one Supabase SDK authentication flow. Supabase stores passwords, manages sessions, and handles email confirmation. Username is optional display metadata, not a unique account identifier or authorization attribute.
 
-No application tables are created yet. Add SQL migrations under `supabase/migrations/` when introducing domain data, and enable Row Level Security with appropriate policies. Use a client carrying the user's access token for protected database requests; never use a secret/service-role key in the frontend.
+Apply both migrations in `supabase/migrations/` in filename order. The first creates private, versioned library snapshots with ownership policies; the second creates private profiles synchronized from Auth. On an existing project where snapshots already work, apply only the new profiles migration.
 
 ## Deploy to Vercel
 
-The root `app.js` exports the Express app; the local listener is separate. For an Express deployment, run `npm run build` as part of the build and include the generated `dist` directory so the interface is available. Add `SUPABASE_URL` and `SUPABASE_PUBLISHABLE_KEY` to the deployment environment when using authentication.
+Use the repository root and Express preset. The root `app.js` exports the Express app; the local listener is separate. `vercel.json` runs `node scripts/build-vercel.mjs`, which builds Vite and copies `dist/` to the generated root `public/` for Vercel's static CDN. Keep the output-directory override disabled; preserve the Express API routes. Source assets belong in `frontend/public/`.
 
-Set environment variables for each desired environment (Production/Preview) and redeploy after changes. For a separately hosted frontend, configure an explicit CORS allowlist before connecting it.
+Set the two `VITE_SUPABASE_*` variables for Production/Preview, then redeploy after changes. Browser values are embedded at build time. Legacy unprefixed Supabase variables are no longer used. Full steps: [deployment guide](docs/DEPLOYMENT.md).
 
 Reference: [Express on Vercel](https://vercel.com/docs/frameworks/backend/express), [Supabase JavaScript setup](https://supabase.com/docs/reference/javascript/initializing).
 
 ## Checks
 
-Run `npm test` for library hierarchy tests and local API smoke tests. Run `npm run build` to check the production frontend bundle. Live authentication requires your own configured Supabase project.
+Run `npm test` for hierarchy, search ranking, metadata, tags, editor history, cloud transfer/conflict, and API checks. Run `npm run build` for the frontend, or `node scripts/build-vercel.mjs` to verify Vercel packaging. Live authentication, email delivery, RLS, and deployment checks require your own configured Supabase/Vercel accounts.
