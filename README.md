@@ -61,7 +61,7 @@ Apply both migrations in `supabase/migrations/` in filename order. The first cre
 
 ## Deploy to Vercel
 
-Use the repository root and Express preset. The root `app.js` exports the Express app; the local listener is separate. `vercel.json` runs `node scripts/build-vercel.mjs`, which builds Vite and copies `dist/` to the generated root `public/` for Vercel's static CDN. Keep the output-directory override disabled; preserve the Express API routes. Source assets belong in `frontend/public/`.
+Use the repository root and Express preset. The root `app.js` directly imports Express, creates the app, configures it through `backend/src/app.js`, and exports it. Keep the direct Express import in this recognized entry point so Vercel can detect it; the local listener remains separate. `vercel.json` runs `node scripts/build-vercel.mjs`, which builds Vite and copies `dist/` to the generated root `public/` for Vercel's static CDN. Keep the output-directory override disabled; preserve the Express API routes. Source assets belong in `frontend/public/`.
 
 Set the two `VITE_SUPABASE_*` variables for Production/Preview, then redeploy after changes. Browser values are embedded at build time. Legacy unprefixed Supabase variables are no longer used. Full steps: [deployment guide](docs/DEPLOYMENT.md).
 

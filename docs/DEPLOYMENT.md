@@ -118,7 +118,7 @@ If using an existing Vercel project, inspect and remove stale dashboard override
 
 1. In Vercel, choose **Add New → Project** and import your repository.
 2. Set the **Root Directory** to the repository root (`./`), not `frontend/` or `backend/`.
-3. Use the **Express** framework preset. This repository's `vercel.json` sets `"framework": "express"`, and root `app.js` exports the Express application.
+3. Use the **Express** framework preset. This repository's `vercel.json` sets `"framework": "express"`. Root `app.js` directly imports `express`, creates the application, configures its routes through `backend/src/app.js`, and exports it. Keep that direct import in the root entry point; a wrapper that only re-exports a nested backend file does not satisfy Vercel's Express detection.
 4. Set the project's **Node.js version** to 22.x, or a currently supported newer version compatible with the package's `>=22` engine.
 5. Keep the install command as `npm ci` (or Vercel's npm default).
 6. Use build command `node scripts/build-vercel.mjs`, supplied by `vercel.json`. Remove a dashboard build override that runs only `npm run build`.
@@ -178,6 +178,7 @@ Before imports/downloads replace local data, CodeRecall saves one previous libra
 | Recovery copy cannot be saved | Export JSON first, free browser storage, then retry. Replacement is blocked when its recovery copy cannot be saved. |
 | Library exceeds 4 MiB | Keep a JSON backup and reduce code/data in the library, or extend the snapshot design and server limits deliberately. |
 | Root page shows API JSON / assets return 404 | Check Express preset, repository root, deployment build command, and generated root `public/index.html` + `public/assets/`. A plain frontend build does not perform Vercel packaging. |
+| “No entrypoint found which imports express” | Deploy the updated root `app.js`, which directly imports and creates Express, and keep Root Directory at the repository root. A wrapper that only imports another app file is not detected. |
 | `/api/health` returns the SPA HTML | Remove an old catch-all SPA rewrite or static-only Vite deployment configuration. |
 | Files appear missing after a domain change | Revisit the old origin and export/import or upload/download its library; browser storage is scoped to origins. |
 
