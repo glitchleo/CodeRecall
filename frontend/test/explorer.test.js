@@ -4,6 +4,9 @@ import {
   ROOT_LABEL, FILE_KINDS, getItemType, getItemSize, buildSizeMap,
   sortItems, formatSize, formatDateTime, makeFileName,
 } from "../src/lib/explorer.js";
+import { getFileLanguage } from "../src/lib/fileTypes.js";
+import { getIconForItem } from "../src/lib/icons.js";
+import { createItem } from "../src/lib/library.js";
 
 const timestamp = "2026-10-12T09:00:00.000Z";
 const item = (id, name, type = "file", parentId = null, extra = {}) => ({
@@ -22,7 +25,9 @@ test("file types come from names while folders and existing text files stay comp
 });
 
 test("creation uses the chosen file kind, trims names, and preserves an existing extension's case", () => {
-  assert.deepEqual(FILE_KINDS.map((kind) => kind.id), ["python", "javascript"]);
+  for (const expected of ['python', 'javascript', 'typescript', 'java', 'html', 'css', 'cpp', 'csharp', 'go', 'rust', 'json', 'markdown']) {
+    assert.ok(FILE_KINDS.some((kind) => kind.id === expected));
+  }
   for (const kind of FILE_KINDS) {
     assert.equal(makeFileName("  ", kind), kind.defaultName);
     assert.equal(makeFileName(undefined, kind.id), kind.defaultName);
@@ -30,6 +35,22 @@ test("creation uses the chosen file kind, trims names, and preserves an existing
     assert.equal(makeFileName(`  MAIN${kind.extension.toUpperCase()}  `, kind), `MAIN${kind.extension.toUpperCase()}`);
   }
   assert.equal(makeFileName("app.test", "javascript"), "app.test.js");
+});
+
+test("Other creates the exact filename and extension and infers the language and icon", () => {
+  for (const [name, language, icon] of [['  name.java  ', 'Java', 'java'], ['Example.RB', 'Ruby', 'ruby'], ['settings.yaml', 'YAML', 'yaml'], ['custom.unknown', 'Plain text', 'file']]) {
+    const filename = makeFileName(name, 'other');
+    const [created] = createItem([], { type: 'file', name: filename });
+    assert.equal(created.name, name.trim());
+    assert.equal(created.content, '');
+    assert.equal(getFileLanguage(created.name), language);
+    assert.equal(getIconForItem(created).id, icon);
+  }
+  assert.equal(makeFileName('', 'other'), '');
+  assert.equal(getFileLanguage('types.d.ts'), 'TypeScript');
+  assert.equal(getFileLanguage('Component.TSX'), 'TypeScript React');
+  assert.equal(getFileLanguage('Dockerfile'), 'Docker');
+  assert.equal(getItemType(item('java', 'name.java')), 'Java file');
 });
 
 test("sizes count UTF-8 bytes, allow explicit future sizes, and total nested folder descendants once", () => {

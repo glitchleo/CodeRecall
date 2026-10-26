@@ -1,11 +1,11 @@
+import { normalizeNotes, equalNotes, validNoteText, validateDescriptionFormat } from './notes.js';
+
 /** The library is a flat tree. `null` represents the library root. */
 export const ROOT_ID = null;
 
 const TYPES = new Set(["folder", "file"]);
 const keyForName = (name) => name.toLocaleLowerCase("en-US");
-const MAX_DESCRIPTION_LENGTH = 4000;
-const validDescription = (value) => typeof value === "string" && value.length <= MAX_DESCRIPTION_LENGTH
-  && !/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/u.test(value);
+const validDescription = validNoteText;
 // Store a catalog key, never a URL or a path supplied by persisted data.
 const validIconId = (value) => typeof value === "string" && (value === "" || /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,95}$/u.test(value));
 
@@ -128,21 +128,54 @@ export function updateFileContent(nodes, id, content) {
   return nodes.map((node) => node.id === id ? { ...node, content, sizeBytes, updatedAt } : node);
 }
 
+/** Save code and its explanatory document together so Save/Discard is atomic. */
+export function updateFileDocument(nodes, id, content, notes) {
+  const item = requireItem(nodes, id);
+  if (item.type !== 'file') throw new Error('Choose a file to edit.');
+  if (typeof content !== 'string') throw new Error('File content must be text.');
+  if (notes === undefined) return updateFileContent(nodes, id, content);
+  if (!notes || typeof notes !== 'object' || Array.isArray(notes)
+    || !validDescription(notes.description)
+    || ('descriptionFormat' in notes && !validateDescriptionFormat(notes.descriptionFormat, notes.description))) {
+    throw new Error('File notes must contain valid text and formatting, with 4000 characters or fewer.');
+  }
+  const normalized = normalizeNotes(notes);
+  if ((item.content ?? '') === content && equalNotes(item, normalized)) return nodes;
+  const updatedAt = new Date().toISOString();
+  const sizeBytes = new TextEncoder().encode(content).byteLength;
+  return nodes.map(node => node.id === id ? { ...node, content, sizeBytes, ...normalized, updatedAt } : node);
+}
+
 /** Search metadata belongs to folders and files; empty icon IDs restore automatic icons. */
 export function updateItemMetadata(nodes, id, metadata) {
   const item = requireItem(nodes, id);
   if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) throw new Error("Enter valid item details.");
-  if (Object.keys(metadata).some((key) => key !== "description" && key !== "iconId")) throw new Error("Choose valid item details.");
+  if (Object.keys(metadata).some((key) => !['description', 'descriptionFormat', 'iconId'].includes(key))) throw new Error("Choose valid item details.");
   if ("description" in metadata && !validDescription(metadata.description)) {
     throw new Error("Descriptions must be text, contain no control characters, and be 4000 characters or fewer.");
   }
   if ("iconId" in metadata && !validIconId(metadata.iconId)) throw new Error("Choose a valid icon from the icon library.");
+  if ('descriptionFormat' in metadata && (item.type !== 'file' || !('description' in metadata)
+    || !validateDescriptionFormat(metadata.descriptionFormat, metadata.description))) throw new Error('Choose valid description formatting.');
   const updates = {};
-  if ("description" in metadata) updates.description = metadata.description.trim();
+  if ('description' in metadata) {
+    if ('descriptionFormat' in metadata) Object.assign(updates, normalizeNotes(metadata));
+    else {
+      updates.description = metadata.description.trim();
+      // A plain-text edit replaces the rich document rather than leaving stale marks.
+      if ('descriptionFormat' in item && updates.description !== item.description) updates.descriptionFormat = undefined;
+    }
+  }
   if ("iconId" in metadata) updates.iconId = metadata.iconId;
-  if (Object.entries(updates).every(([key, value]) => (item[key] ?? "") === value)) return nodes;
+  if (Object.entries(updates).every(([key, value]) => key === 'descriptionFormat'
+    ? JSON.stringify(item[key]) === JSON.stringify(value) : (item[key] ?? "") === value)) return nodes;
   const updatedAt = new Date().toISOString();
-  return nodes.map((node) => node.id === id ? { ...node, ...updates, updatedAt } : node);
+  return nodes.map((node) => {
+    if (node.id !== id) return node;
+    const next = { ...node, ...updates, updatedAt };
+    if (next.descriptionFormat === undefined) delete next.descriptionFormat;
+    return next;
+  });
 }
 
 export function renameItem(nodes, id, name) {
@@ -238,6 +271,7 @@ export function validateStoredNodes(value) {
         || !node.tagIds.every((id) => typeof id === "string" && Boolean(id.trim()))
         || new Set(node.tagIds).size !== node.tagIds.length)) return false;
       if ("description" in node && !validDescription(node.description)) return false;
+      if ('descriptionFormat' in node && (node.type !== 'file' || !validateDescriptionFormat(node.descriptionFormat, node.description))) return false;
       if ("iconId" in node && !validIconId(node.iconId)) return false;
       if (node.type === "file" && "sizeBytes" in node && (!Number.isInteger(node.sizeBytes) || node.sizeBytes < 0)) return false;
       if (node.parentId !== ROOT_ID && typeof node.parentId !== "string") return false;

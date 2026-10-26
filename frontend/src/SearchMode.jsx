@@ -2,10 +2,12 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import ItemIcon from './ItemIcon.jsx';
 import TagPicker, { TagBadges } from './TagPicker.jsx';
 import MetadataPanel from './MetadataPanel.jsx';
+import { CodeTokens } from './SyntaxCode.jsx';
 import { getAncestors } from './lib/library.js';
 import { buildSearchIndex } from './lib/search.js';
 import { getFileTags } from './lib/tags.js';
 import { ROOT_LABEL, formatDateTime, getItemType } from './lib/explorer.js';
+import { FILE_TEMPLATES, OTHER_FILE_TEMPLATE } from './lib/fileTypes.js';
 import './search.css';
 
 export function SearchIcon({ name, size = 18 }) {
@@ -23,14 +25,18 @@ export function SearchIcon({ name, size = 18 }) {
     drive: <><path d="M4 5h16l2 12H2L4 5Zm-2 12v4h20v-4M6 18.5h.01M9 18.5h.01" /></>,
     chevron: <path d="m9 6 6 6-6 6" />,
     info: <><circle cx="12" cy="12" r="9" /><path d="M12 11v6M12 7h.01" /></>,
+    notes: <><rect x="3" y="3" width="18" height="18" rx="2" /><path d="M14 3v18M17 8h1M17 12h1M17 16h1" /></>,
+    expand: <><path d="M8 3H3v5M16 3h5v5M3 16v5h5M21 16v5h-5M8 8 3 3M16 8l5-5M8 16l-5 5M16 16l5 5" /></>,
+    split: <><rect x="3" y="3" width="18" height="18" rx="2" /><path d="M12 3v18" /></>,
   };
   return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{paths[name] || paths.search}</svg>;
 }
 
 // Small, bounded previews keep large snippets from making result cards expensive.
-export function CodeLines({ content = '', preview = false }) {
+export function CodeLines({ content = '', filename = '', preview = false }) {
   const text = preview ? content.slice(0, 6000).split('\n').slice(0, 12).join('\n') : content;
-  return <pre className={`snippet-code${preview ? ' snippet-code-preview' : ''}`}><code>{text || <span className="code-empty">No code yet</span>}</code></pre>;
+  const code = <pre className={`snippet-code${preview ? ' snippet-code-preview' : ''}`}><code>{text ? <CodeTokens code={text} filename={filename} /> : <span className="code-empty">No code yet</span>}</code></pre>;
+  return preview ? code : <div className="snippet-document"><pre className="snippet-read-gutter" aria-hidden="true">{text.split('\n').map((_, index) => index + 1).join('\n')}</pre>{code}</div>;
 }
 
 function ResultCard({ item, tags, previews, childCount, path, onOpen, onEdit, onCopy, onDetails }) {
@@ -40,7 +46,7 @@ function ResultCard({ item, tags, previews, childCount, path, onOpen, onEdit, on
     {item.type === 'folder' ? <div className="folder-card-body">
       <div className="folder-card-caption">{childCount} {childCount === 1 ? 'item' : 'items'}</div>
       <div className="folder-preview-list">{previews.map(({ item: child }) => <button key={child.id} className="folder-preview-row" onClick={() => onOpen(child)} title={`Open ${child.name}`}><ItemIcon item={child} size={18} /><span>{child.name}</span><SearchIcon name="arrow" size={14} /></button>)}{previews.length === 0 && <span className="folder-empty">Empty folder</span>}</div>
-    </div> : <button className="code-preview-button" onClick={() => onOpen(item)} aria-label={`Read ${item.name}`}><CodeLines content={item.content} preview /><span className="code-preview-fade" /></button>}
+    </div> : <button className="code-preview-button" onClick={() => onOpen(item)} aria-label={`Read ${item.name}`}><CodeLines content={item.content} filename={item.name} preview /><span className="code-preview-fade" /></button>}
     {(item.description || assigned.length > 0) && <div className="result-card-meta">{item.description && <p className="result-description" title={item.description}>{item.description}</p>}{assigned.length > 0 && <div className="result-tags"><TagBadges tags={assigned.slice(0, 3)} />{assigned.length > 3 && <span className="more-tags">+{assigned.length - 3}</span>}</div>}</div>}
     <footer className="result-card-footer"><span className="result-location" title={path || ROOT_LABEL}>{path || ROOT_LABEL}</span><div>
       {item.type === 'file' && <><button title={`Copy code from ${item.name}`} aria-label={`Copy code from ${item.name}`} onClick={() => onCopy(item)}><SearchIcon name="copy" size={15} /></button><button title={`Edit ${item.name}`} aria-label={`Edit ${item.name}`} onClick={() => onEdit(item)}><SearchIcon name="edit" size={15} /></button></>}
@@ -78,7 +84,7 @@ export default function SearchMode({ nodes, tags, query, onQuery, searchRef, tag
   function details(item) { setDetailsOnly(item.type === 'folder'); setOpenedId(item.id); }
   return <section className="find-workspace" aria-label="Find code">
     <div className="command-bar find-command-bar" role="toolbar" aria-label="Search actions">
-      <div className="find-new-wrap"><button className="toolbar-button" aria-expanded={newMenu} onClick={() => setNewMenu(value => !value)}><SearchIcon name="plus" size={16} /><span>New</span><SearchIcon name="down" size={12} /></button>{newMenu && <><button className="find-menu-dismiss" aria-label="Close new menu" onClick={() => setNewMenu(false)} /><div className="find-new-menu">{[['folder', 'Folder'], ['python', 'Python file'], ['javascript', 'JavaScript file']].map(([id, label]) => <button key={id} onClick={() => { setNewMenu(false); onCreate(id); }}>{label}</button>)}</div></>}</div>
+      <div className="find-new-wrap"><button className="toolbar-button" aria-expanded={newMenu} onClick={() => setNewMenu(value => !value)}><SearchIcon name="plus" size={16} /><span>New</span><SearchIcon name="down" size={12} /></button>{newMenu && <><button className="find-menu-dismiss" aria-label="Close new menu" onClick={() => setNewMenu(false)} /><div className="find-new-menu" role="menu" aria-label="Create a folder or file"><button role="menuitem" className="find-new-folder" onClick={() => { setNewMenu(false); onCreate('folder'); }}><ItemIcon item={{ type: 'folder', name: 'Folder' }} /><span>Folder</span></button><span className="find-new-caption">Programming files</span>{[...FILE_TEMPLATES, OTHER_FILE_TEMPLATE].map(template => <button role="menuitem" key={template.id} onClick={() => { setNewMenu(false); onCreate(template.id); }}><ItemIcon item={{ type: 'file', name: template.defaultName || 'file' }} /><span>{template.label}</span><small>{template.extension || 'name.ext'}</small></button>)}</div></>}</div>
       <span className="toolbar-separator" />
       <TagPicker label="Filter tags" tags={tags} selectedIds={tagFilter} onToggle={onToggleFilter} onCreate={name => onCreateTag(name)} />
       <span className="toolbar-separator" />
@@ -101,14 +107,32 @@ export default function SearchMode({ nodes, tags, query, onQuery, searchRef, tag
 function ItemViewer({ item, nodes, tags, detailsOnly, onClose, onEdit, onCopy, onSaveMetadata, onToggleTag, onCreateTag }) {
   const dialogRef = useRef(null);
   const closeRef = useRef(null);
+  const metadataRef = useRef(null);
+  const bodyRef = useRef(null);
+  const [notesMode, setNotesMode] = useState('split');
+  const [notesWidth, setNotesWidth] = useState(35);
+  const [mobilePane, setMobilePane] = useState('code');
+  const changeWidth = value => setNotesWidth(Math.min(75, Math.max(20, Number(value))));
+  const resizeNotes = clientX => {
+    const bounds = bodyRef.current?.getBoundingClientRect();
+    if (bounds?.width) changeWidth((bounds.right - clientX) / bounds.width * 100);
+  };
+  const requestClose = useCallback(() => {
+    if (metadataRef.current && !metadataRef.current.requestSave()?.ok) return;
+    onClose();
+  }, [onClose]);
+  const requestEdit = () => {
+    if (metadataRef.current && !metadataRef.current.requestSave()?.ok) return;
+    onEdit();
+  };
   useEffect(() => {
     const previous = document.activeElement;
     closeRef.current?.focus();
     function handleKey(event) {
       if (event.target.closest?.('.tag-picker-menu, .icon-picker-menu')) return;
-      if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); onClose(); }
+      if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); requestClose(); }
       if (event.key === 'Tab') {
-        const focusable = [...dialogRef.current.querySelectorAll('button:not(:disabled), textarea, input, [tabindex="0"]')].filter(node => node.getClientRects().length);
+        const focusable = [...dialogRef.current.querySelectorAll('button:not(:disabled), textarea, input, select, [contenteditable="true"], [tabindex="0"]')].filter(node => node.getClientRects().length);
         const first = focusable[0], last = focusable.at(-1);
         if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus(); }
         else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
@@ -117,9 +141,16 @@ function ItemViewer({ item, nodes, tags, detailsOnly, onClose, onEdit, onCopy, o
     const dialog = dialogRef.current;
     dialog.addEventListener('keydown', handleKey);
     return () => { dialog.removeEventListener('keydown', handleKey); previous?.isConnected && previous.focus(); };
-  }, [onClose]);
-  return <div className="viewer-overlay" data-item-viewer="" onMouseDown={event => { if (event.target === event.currentTarget) onClose(); }}><section ref={dialogRef} className={`item-viewer${detailsOnly ? ' metadata-viewer' : ''}`} role="dialog" aria-modal="true" aria-labelledby="viewer-title">
-    <header className="viewer-heading"><ItemIcon item={item} size={24} /><div><h2 id="viewer-title">{item.name}</h2><p>{['Library', ...getAncestors(nodes, item.id).map(node => node.name)].join(' / ')}</p></div><div className="viewer-actions">{item.type === 'file' && <><button className="button secondary" aria-label="Copy code" onClick={onCopy}><SearchIcon name="copy" size={15} /><span>Copy code</span></button><button className="button primary" aria-label={`Edit ${item.name}`} onClick={onEdit}><SearchIcon name="edit" size={15} /><span>Edit</span></button></>}<button ref={closeRef} className="icon-button" aria-label="Close preview" onClick={onClose}><SearchIcon name="close" /></button></div></header>
-    <div className="viewer-body">{!detailsOnly && <div className="viewer-code" tabIndex={0} aria-label="Full code, scroll to read"><CodeLines content={item.content} /></div>}<aside className="viewer-details" aria-label="Description and tags"><div className="viewer-type">{getItemType(item)}</div><MetadataPanel item={item} tags={tags} onSave={onSaveMetadata} onToggleTag={onToggleTag} onCreateTag={onCreateTag} /><dl className="viewer-dates"><dt>Last updated</dt><dd>{formatDateTime(item.updatedAt)}</dd><dt>Created</dt><dd>{formatDateTime(item.createdAt)}</dd></dl></aside></div>
+  }, [requestClose]);
+  return <div className="viewer-overlay" data-item-viewer="" onMouseDown={event => { if (event.target === event.currentTarget) requestClose(); }}><section ref={dialogRef} className={`item-viewer${detailsOnly ? ' metadata-viewer' : ''}`} role="dialog" aria-modal="true" aria-labelledby="viewer-title">
+    <header className="viewer-heading"><ItemIcon item={item} size={24} /><div><h2 id="viewer-title">{item.name}</h2><p>{['Library', ...getAncestors(nodes, item.id).map(node => node.name)].join(' / ')}</p></div><div className="viewer-actions">{item.type === 'file' && <><button className="button secondary" aria-label="Copy code" onClick={onCopy}><SearchIcon name="copy" size={15} /><span>Copy code</span></button><button className="button primary" aria-label={`Edit ${item.name}`} onClick={requestEdit}><SearchIcon name="edit" size={15} /><span>Edit</span></button></>}<button ref={closeRef} className="icon-button" aria-label="Close preview" onClick={requestClose}><SearchIcon name="close" /></button></div></header>
+    {!detailsOnly && <div className="viewer-workspace-bar">
+      <div className="viewer-mobile-switch" aria-label="Preview workspace"><button aria-pressed={mobilePane === 'code'} onClick={() => setMobilePane('code')}>Code</button><button aria-pressed={mobilePane === 'notes'} onClick={() => setMobilePane('notes')}>Notes</button></div>
+      <span className="viewer-code-caption">Source preview</span>
+      <div className="viewer-panel-controls"><button className={notesMode !== 'hidden' ? 'active' : ''} aria-pressed={notesMode !== 'hidden'} aria-label={notesMode === 'hidden' ? 'Show notes panel' : 'Hide notes panel'} title={notesMode === 'hidden' ? 'Show notes panel' : 'Hide notes panel'} onClick={() => setNotesMode(mode => mode === 'hidden' ? 'split' : 'hidden')}><SearchIcon name="notes" size={15} /><span>Notes</span></button>{notesMode !== 'hidden' && <>{notesMode === 'split' && <label className="viewer-width-control">Width<input type="range" min="20" max="75" value={notesWidth} onChange={event => changeWidth(event.target.value)} aria-label="Notes panel width" /><output>{Math.round(notesWidth)}%</output></label>}<button aria-label={notesMode === 'full' ? 'Restore split view' : 'Expand notes to full width'} title={notesMode === 'full' ? 'Restore split view' : 'Expand notes to full width'} onClick={() => setNotesMode(mode => mode === 'full' ? 'split' : 'full')}><SearchIcon name={notesMode === 'full' ? 'split' : 'expand'} size={15} /></button></>}</div>
+    </div>}
+    <div ref={bodyRef} className={`viewer-body viewer-notes-${notesMode} viewer-mobile-${mobilePane}`} style={{ '--viewer-notes-width': `${notesWidth}%` }}>{!detailsOnly && <div className="viewer-code" tabIndex={0} aria-label="Full code, scroll to read"><CodeLines content={item.content} filename={item.name} /></div>}
+      {!detailsOnly && <div className="viewer-resizer" role="separator" aria-label="Resize notes panel" aria-orientation="vertical" aria-valuemin={20} aria-valuemax={75} aria-valuenow={Math.round(notesWidth)} tabIndex={0} onKeyDown={event => { if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') { event.preventDefault(); changeWidth(notesWidth + (event.key === 'ArrowLeft' ? 2 : -2)); } }} onPointerDown={event => { event.preventDefault(); event.currentTarget.setPointerCapture(event.pointerId); resizeNotes(event.clientX); }} onPointerMove={event => { if (event.currentTarget.hasPointerCapture(event.pointerId)) resizeNotes(event.clientX); }} onPointerUp={event => { if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId); }} />}
+      <aside className="viewer-details" aria-label="Description and tags"><div className="viewer-type">{getItemType(item)}</div><MetadataPanel ref={metadataRef} item={item} tags={tags} onSave={onSaveMetadata} onToggleTag={onToggleTag} onCreateTag={onCreateTag} /><dl className="viewer-dates"><dt>Last updated</dt><dd>{formatDateTime(item.updatedAt)}</dd><dt>Created</dt><dd>{formatDateTime(item.createdAt)}</dd></dl></aside></div>
   </section></div>;
 }

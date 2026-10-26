@@ -1,0 +1,11 @@
+.syntax-code { margin: 0; color: #d4d4d4; tab-size: 4; }
+.syntax-comment { color: #6a9955; }
+.syntax-keyword { color: #c586c0; }
+.syntax-string { color: #ce9178; }
+.syntax-number { color: #b5cea8; }
+.syntax-function { color: #dcdcaa; }
+.syntax-type { color: #4ec9b0; }
+.syntax-attribute { color: #9cdcfe; }
+.syntax-tag { color: #569cd6; }
+.syntax-operator { color: #d4d4d4; }
+.syntax-punctuation { color: #c8c8c8; }

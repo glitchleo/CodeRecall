@@ -1,10 +1,9 @@
+import { FILE_TEMPLATES, OTHER_FILE_TEMPLATE, getFileType } from './fileTypes.js';
+
 /** Display helpers for the explorer. The persisted library node shape stays unchanged. */
 export const ROOT_LABEL = "D:";
 
-export const FILE_KINDS = Object.freeze([
-  Object.freeze({ id: "python", label: "Python file", extension: ".py", defaultName: "New Python file.py" }),
-  Object.freeze({ id: "javascript", label: "JavaScript file", extension: ".js", defaultName: "New JavaScript file.js" }),
-]);
+export const FILE_KINDS = FILE_TEMPLATES;
 
 const nameCollator = new Intl.Collator(undefined, { numeric: true, sensitivity: "base" });
 const dateFormatter = new Intl.DateTimeFormat(undefined, {
@@ -15,11 +14,7 @@ const textEncoder = new TextEncoder();
 
 export function getItemType(item) {
   if (item.type === "folder") return "File folder";
-  const name = item.name.toLocaleLowerCase("en-US");
-  if (name.endsWith(".py")) return "Python file";
-  if (name.endsWith(".js")) return "JavaScript file";
-  if (name.endsWith(".txt")) return "Text document";
-  return "File";
+  return getFileType(item.name)?.label ?? "File";
 }
 
 function fileSize(item) {
@@ -101,8 +96,10 @@ export function formatDateTime(value) {
 
 /** Creation adds the chosen extension; renaming is handled by the library model. */
 export function makeFileName(value, kind) {
-  const fileKind = FILE_KINDS.find((candidate) => candidate.id === (typeof kind === "string" ? kind : kind?.id)) ?? FILE_KINDS[0];
+  const kindId = typeof kind === "string" ? kind : kind?.id;
+  const fileKind = kindId === 'other' ? OTHER_FILE_TEMPLATE : FILE_KINDS.find((candidate) => candidate.id === kindId) ?? FILE_KINDS[0];
   const name = typeof value === "string" ? value.trim() : "";
+  if (fileKind.id === 'other') return name;
   if (!name) return fileKind.defaultName;
   return name.toLocaleLowerCase("en-US").endsWith(fileKind.extension) ? name : `${name}${fileKind.extension}`;
 }

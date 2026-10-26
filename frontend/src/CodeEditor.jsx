@@ -1,6 +1,11 @@
 import React, { forwardRef, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createEditorState, recordEdit, undoEdit, redoEdit, selectEditorRange, indentSelection, insertLineBreak, normalizeLineEndings } from './lib/editor.js';
 import TagPicker, { TagBadges } from './TagPicker.jsx';
+import ItemIcon from './ItemIcon.jsx';
+import FileNotes from './FileNotes.jsx';
+import { CodeTokens } from './SyntaxCode.jsx';
+import { getFileLanguage } from './lib/fileTypes.js';
+import { notesFromItem, equalNotes } from './lib/notes.js';
 import './editor.css';
 
 function EditorIcon({ name, size = 17 }) {
@@ -11,6 +16,10 @@ function EditorIcon({ name, size = 17 }) {
     redo: <><path d="m16 4 5 5-5 5M21 9H10a6 6 0 0 0 0 12" /></>,
     wrap: <><path d="M3 6h18M3 12h14a3 3 0 0 1 0 6h-4m3-3-3 3 3 3M3 18h5" /></>,
     file: <><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z" /><path d="M14 2v6h6M8 13h8M8 17h5" /></>,
+    notes: <><rect x="3" y="3" width="18" height="18" rx="2" /><path d="M14 3v18M17 8h1M17 12h1M17 16h1" /></>,
+    expand: <><path d="M8 3H3v5M16 3h5v5M3 16v5h5M21 16v5h-5M3 3l6 6m12-6-6 6M3 21l6-6m12 6-6-6" /></>,
+    split: <><rect x="3" y="3" width="18" height="18" rx="2" /><path d="M12 3v18" /></>,
+    close: <path d="m6 6 12 12M6 18 18 6" />,
   };
   return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{paths[name]}</svg>;
 }
@@ -28,12 +37,21 @@ const CodeEditor = forwardRef(function CodeEditor({ file, path, onSave, onClose,
   const historyRef = useRef(history);
   const [savedText, setSavedText] = useState(initialText);
   const savedTextRef = useRef(initialText);
+  const [notes, setNotes] = useState(() => notesFromItem(file));
+  const notesRef = useRef(notes);
+  const [savedNotes, setSavedNotes] = useState(notes);
+  const savedNotesRef = useRef(notes);
+  const [notesMode, setNotesMode] = useState('split');
+  const [notesWidth, setNotesWidth] = useState(36);
+  const [mobilePane, setMobilePane] = useState('code');
   const [wrap, setWrap] = useState(false);
   const [saveError, setSaveError] = useState('');
   const [showUnsaved, setShowUnsaved] = useState(false);
   const [wrapWidth, setWrapWidth] = useState(0);
   const [lineHeights, setLineHeights] = useState([]);
   const inputRef = useRef(null);
+  const highlightRef = useRef(null);
+  const workspaceRef = useRef(null);
   const gutterRef = useRef(null);
   const mirrorRef = useRef(null);
   const dialogRef = useRef(null);
@@ -47,13 +65,13 @@ const CodeEditor = forwardRef(function CodeEditor({ file, path, onSave, onClose,
   dirtyCallbackRef.current = onDirtyChange;
 
   const text = history.present.text;
-  const dirty = text !== savedText || persistenceError;
+  const dirty = text !== savedText || !equalNotes(notes, savedNotes) || persistenceError;
   const visibleSaveError = saveError || (persistenceError ? 'Browser storage is unavailable. Save to retry keeping this file.' : '');
   const dirtyRef = useRef(dirty);
   dirtyRef.current = dirty;
   const lines = useMemo(() => normalizeLineEndings(text).split('\n'), [text]);
   const cursorLines = normalizeLineEndings(text.slice(0, history.present.end)).split('\n');
-  const language = file.name.toLowerCase().endsWith('.py') ? 'Python' : file.name.toLowerCase().endsWith('.js') ? 'JavaScript' : 'Plain text';
+  const language = getFileLanguage(file.name);
   const assignedTags = tags.filter((tag) => file.tagIds?.includes(tag.id));
 
   const focusInput = useCallback(() => inputRef.current?.focus({ preventScroll: true }), []);
@@ -100,13 +118,14 @@ const CodeEditor = forwardRef(function CodeEditor({ file, path, onSave, onClose,
 
   const save = useCallback((restoreFocus = true) => {
     const content = historyRef.current.present.text;
-    if (content === savedTextRef.current && !persistenceError) {
+    const currentNotes = notesRef.current;
+    if (content === savedTextRef.current && equalNotes(currentNotes, savedNotesRef.current) && !persistenceError) {
       setSaveError('');
       if (restoreFocus) focusInput();
       return true;
     }
     try {
-      const result = onSave(content);
+      const result = onSave(content, currentNotes);
       if (!result?.ok) {
         setSaveError(result?.message || 'Could not save this file. Your changes are still open here.');
         if (restoreFocus) focusInput();
@@ -114,6 +133,8 @@ const CodeEditor = forwardRef(function CodeEditor({ file, path, onSave, onClose,
       }
       savedTextRef.current = content;
       setSavedText(content);
+      savedNotesRef.current = currentNotes;
+      setSavedNotes(currentNotes);
       dirtyRef.current = false;
       // A new typing group after Save must undo back to the saved version.
       // Keep every existing undo/redo entry while ending the current group.
@@ -158,7 +179,7 @@ const CodeEditor = forwardRef(function CodeEditor({ file, path, onSave, onClose,
       if (event.target?.closest?.('[data-tag-picker]')) return;
       if ((event.ctrlKey || event.metaKey) && !event.altKey && event.key.toLowerCase() === 's') {
         event.preventDefault();
-        if (!showUnsaved) save();
+        if (!showUnsaved) save(event.target === inputRef.current);
       }
     };
     window.addEventListener('keydown', keydown);
@@ -258,29 +279,60 @@ const CodeEditor = forwardRef(function CodeEditor({ file, path, onSave, onClose,
     }
   };
 
+  const updateNotes = (next) => {
+    notesRef.current = next;
+    dirtyRef.current = historyRef.current.present.text !== savedTextRef.current || !equalNotes(next, savedNotesRef.current) || persistenceError;
+    setNotes(next);
+    setSaveError('');
+  };
+
+  const resizeNotes = (clientX) => {
+    const bounds = workspaceRef.current?.getBoundingClientRect();
+    if (bounds?.width) setNotesWidth(Math.round(Math.min(70, Math.max(25, (bounds.right - clientX) / bounds.width * 100))));
+  };
+
+  const syncScroll = (input) => {
+    // Translate instead of scrolling the gutter: its viewport has no horizontal
+    // scrollbar, so its native maximum scroll offset can be shorter than the input.
+    if (gutterRef.current?.firstElementChild) gutterRef.current.firstElementChild.style.transform = `translateY(${-input.scrollTop}px)`;
+    if (highlightRef.current) {
+      highlightRef.current.scrollTop = input.scrollTop;
+      highlightRef.current.scrollLeft = input.scrollLeft;
+    }
+  };
+
+  useLayoutEffect(() => { if (inputRef.current) syncScroll(inputRef.current); }, [text, wrap, wrapWidth, notesMode, mobilePane]);
+
   return <section className="code-editor" aria-label={`Editing ${file.name}`}>
     <div className="editor-command-bar">
       <button className="editor-toolbar-button editor-back" aria-label="Back to files" title="Back to files" onClick={() => requestClose()}><EditorIcon name="back" /><span>Back to files</span></button>
       <span className="editor-separator" />
-      <div className="editor-file-name" title={file.name}><EditorIcon name="file" /><span>{file.name}</span>{dirty && <span className="editor-dirty-dot" aria-label="Unsaved changes" />}</div>
+      <div className="editor-file-name" title={file.name}><ItemIcon item={{ ...file, iconId: '' }} size={19} /><span className="editor-name-label">{file.name}</span>{dirty && <span className="editor-dirty-dot" aria-label="Unsaved changes" />}</div>
       <div className="editor-command-spacer" />
-      <button className="editor-toolbar-button editor-save" aria-label="Save" title="Save (Ctrl+S)" disabled={!dirty} onClick={() => save()}><EditorIcon name="save" /><span>Save</span></button>
+      <button className="editor-toolbar-button editor-save" aria-label="Save" title="Save code and notes (Ctrl+S)" disabled={!dirty} onClick={() => save(false)}><EditorIcon name="save" /><span>Save</span></button>
       <span className="editor-separator" />
+      <div className="editor-code-actions">
       <button className="editor-toolbar-button editor-icon-button" aria-label="Undo" title="Undo (Ctrl+Z)" disabled={!history.past.length} onMouseDown={(event) => event.preventDefault()} onClick={() => applyHistory(undoEdit(historyRef.current))}><EditorIcon name="undo" /></button>
       <button className="editor-toolbar-button editor-icon-button" aria-label="Redo" title="Redo (Ctrl+Shift+Z)" disabled={!history.future.length} onMouseDown={(event) => event.preventDefault()} onClick={() => applyHistory(redoEdit(historyRef.current))}><EditorIcon name="redo" /></button>
       <span className="editor-separator" />
       <TagPicker label="Tags" tags={tags} selectedIds={file.tagIds || []} onToggle={onToggleTag} onCreate={onCreateTag} disabled={showUnsaved} />
       <span className="editor-separator" />
       <button className={`editor-toolbar-button editor-wrap-button${wrap ? ' active' : ''}`} aria-label="Word wrap" aria-pressed={wrap} title="Word wrap" onMouseDown={(event) => event.preventDefault()} onClick={() => { setWrap((current) => !current); focusInput(); }}><EditorIcon name="wrap" /><span>Word wrap</span></button>
+      <button className={`editor-toolbar-button editor-notes-toggle${notesMode !== 'hidden' ? ' active' : ''}`} aria-label={notesMode === 'hidden' ? 'Show notes panel' : 'Hide notes panel'} aria-expanded={notesMode !== 'hidden'} aria-controls="editor-file-notes" title="Toggle file notes" onClick={() => setNotesMode(current => current === 'hidden' ? 'split' : 'hidden')}><EditorIcon name="notes" /><span>Notes</span></button>
+      </div>
     </div>
-    <div className="editor-path" title={path}><EditorIcon name="file" size={14} /><span>{path || file.name}</span></div>
+    <div className="editor-path" title={path}><ItemIcon item={{ ...file, iconId: '' }} size={14} /><span>{path || file.name}</span><span className="editor-language-label">{language}</span></div>
     {assignedTags.length > 0 && <div className="editor-tags-row"><TagBadges tags={assignedTags} /></div>}
     {!showUnsaved && visibleSaveError && <div className="editor-save-error" role="alert">{visibleSaveError}</div>}
+    <div className="editor-mobile-tabs" aria-label="Editor view"><button className={mobilePane === 'code' ? 'active' : ''} aria-pressed={mobilePane === 'code'} onClick={() => setMobilePane('code')}><EditorIcon name="file" size={15} />Code</button><button className={mobilePane === 'notes' ? 'active' : ''} aria-pressed={mobilePane === 'notes'} onClick={() => { setMobilePane('notes'); if (notesMode === 'hidden') setNotesMode('split'); }}><EditorIcon name="notes" size={15} />Notes & description</button></div>
+    <div className={`editor-workspace notes-${notesMode} mobile-${mobilePane}`} ref={workspaceRef} style={{ '--notes-width': `${notesWidth}%` }}>
+    <div className="editor-code-pane">
     <div className="editor-document">
       <div className="editor-gutter" ref={gutterRef} aria-hidden="true" style={{ width: `${Math.max(3, String(lines.length).length) + 2}ch` }}>
         <div className="editor-line-numbers">{lines.map((_, index) => <div key={index} className={index === cursorLines.length - 1 ? 'current-line-number' : undefined} style={wrap ? { height: lineHeights[index] || 22 } : undefined}>{index + 1}</div>)}</div>
       </div>
       <div className="editor-text-area">
+        <pre ref={highlightRef} className={`editor-highlight${wrap ? ' editor-highlight-wrapped' : ''}`} aria-hidden="true" style={wrapWidth ? { width: wrapWidth + 32 } : undefined}><code><CodeTokens code={text + '\n'} filename={file.name} /></code></pre>
         <textarea
           ref={inputRef}
           className={`editor-input${wrap ? ' editor-input-wrapped' : ''}`}
@@ -295,10 +347,19 @@ const CodeEditor = forwardRef(function CodeEditor({ file, path, onSave, onClose,
           onSelect={(event) => syncSelection(event.currentTarget)}
           onChange={handleChange}
           onKeyDown={handleKeyDown}
-          onScroll={(event) => { if (gutterRef.current) gutterRef.current.scrollTop = event.currentTarget.scrollTop; }}
+          onScroll={(event) => syncScroll(event.currentTarget)}
         />
         {wrap && <div className="editor-wrap-measure" ref={mirrorRef} aria-hidden="true" style={{ width: wrapWidth }}>{lines.map((line, index) => <div key={index}>{line || '\u200b'}</div>)}</div>}
       </div>
+    </div>
+    </div>
+    <div className="editor-notes-divider" role="separator" tabIndex={notesMode === 'split' ? 0 : -1} aria-label="Resize notes panel" aria-orientation="vertical" aria-valuemin={25} aria-valuemax={70} aria-valuenow={notesWidth} onKeyDown={event => { if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') { event.preventDefault(); setNotesWidth(width => Math.min(70, Math.max(25, width + (event.key === 'ArrowLeft' ? 2 : -2)))); } }} onPointerDown={event => { event.preventDefault(); event.currentTarget.setPointerCapture(event.pointerId); }} onPointerMove={event => { if (event.currentTarget.hasPointerCapture(event.pointerId)) resizeNotes(event.clientX); }} onPointerUp={event => { if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId); }} />
+    <aside id="editor-file-notes" className="editor-notes-pane" aria-label="File notes and description">
+      <header className="editor-notes-heading"><div><span><EditorIcon name="notes" size={15} />File notes</span><small>Description & explanation</small></div><button className="editor-toolbar-button editor-icon-button editor-notes-expand" aria-label={notesMode === 'full' ? 'Show code and notes' : 'Expand notes to full width'} title={notesMode === 'full' ? 'Show code and notes' : 'Expand notes to full width'} onClick={() => setNotesMode(mode => mode === 'full' ? 'split' : 'full')}><EditorIcon name={notesMode === 'full' ? 'split' : 'expand'} size={15} /></button><button className="editor-toolbar-button editor-icon-button editor-notes-close" aria-label="Close notes panel" title="Close notes panel" onClick={() => setNotesMode('hidden')}><EditorIcon name="close" size={15} /></button></header>
+      <div className="editor-notes-size"><label htmlFor="editor-notes-width">Panel width</label><input id="editor-notes-width" type="range" min="25" max="70" value={notesWidth} onChange={event => setNotesWidth(Number(event.target.value))} /><output htmlFor="editor-notes-width">{notesWidth}%</output></div>
+      <FileNotes value={notes} onChange={updateNotes} label={`Notes for ${file.name}`} />
+      <footer className="editor-notes-footer">Notes save with this file · Ctrl / ⌘ S</footer>
+    </aside>
     </div>
     <div className="editor-status-bar">
       <span className={dirty ? 'editor-unsaved-status' : 'editor-saved-status'} role="status">{dirty ? 'Unsaved changes' : 'Saved'}</span>

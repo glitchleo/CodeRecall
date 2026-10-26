@@ -1,6 +1,7 @@
 import React, { lazy, Suspense, useEffect, useRef, useState } from 'react';
-import { createInitialNodes, createItem, renameItem, moveItems, copyItems, deleteItems, toggleStar, getChildren, getAncestors, isDescendant, updateFileContent, updateItemMetadata } from './lib/library.js';
+import { createInitialNodes, createItem, renameItem, moveItems, copyItems, deleteItems, toggleStar, getChildren, getAncestors, isDescendant, updateFileDocument, updateItemMetadata } from './lib/library.js';
 import { FILE_KINDS, ROOT_LABEL, getItemType, buildSizeMap, sortItems, formatSize, formatDateTime, makeFileName } from './lib/explorer.js';
+import { OTHER_FILE_TEMPLATE, getFileLanguage } from './lib/fileTypes.js';
 import CodeEditor from './CodeEditor.jsx';
 import TagPicker, { TagBadges } from './TagPicker.jsx';
 import { createTag, assignFileTags, decodeLibrary, encodeLibrary, getFileTags, matchesFileSearch, matchesTagFilter } from './lib/tags.js';
@@ -54,8 +55,8 @@ function Icon({ name, size = 17, ...props }) {
   return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" {...props}>{paths[name] || paths.file}</svg>;
 }
 
-function MenuItem({ icon, children, shortcut, checked, danger, ...props }) {
-  return <button role="menuitem" className={danger ? 'danger-menu-item' : undefined} {...props}><Icon name={checked ? 'check' : icon || 'file'} size={16} /><span>{children}</span>{shortcut && <kbd>{shortcut}</kbd>}</button>;
+function MenuItem({ icon, item, children, shortcut, checked, danger, ...props }) {
+  return <button role="menuitem" className={danger ? 'danger-menu-item' : undefined} {...props}>{item ? <ItemIcon item={item} size={18} /> : <Icon name={checked ? 'check' : icon || 'file'} size={16} />}<span>{children}</span>{shortcut && <kbd>{shortcut}</kbd>}</button>;
 }
 
 function loadLibrary() {
@@ -285,9 +286,9 @@ export default function App() {
     else { setSelected([item.id]); setEditorFileId(item.id); setToast(null); setMenu(null); }
   }
 
-  function saveEditorContent(content) {
+  function saveEditorContent(content, notes) {
     try {
-      const next = updateFileContent(nodes, editorFileId, content);
+      const next = updateFileDocument(nodes, editorFileId, content, notes);
       // Confirm the write before reporting a save; keep the editor dirty if storage is full.
       localStorage.setItem(STORAGE_KEY, JSON.stringify(encodeLibrary(next, tags)));
       setNodes(next); setStorageError(false);
@@ -319,7 +320,7 @@ export default function App() {
 
   function beginCreate(kind) {
     if (!canCreate) return;
-    const fileKind = FILE_KINDS.find(item => item.id === kind);
+    const fileKind = kind === 'folder' ? null : kind === 'other' ? OTHER_FILE_TEMPLATE : FILE_KINDS.find(item => item.id === kind) ?? FILE_KINDS[0];
     setName(kind === 'folder' ? 'New folder' : fileKind.defaultName);
     setDialog({ type: 'create', itemType: kind === 'folder' ? 'folder' : 'file', fileKind }); setMenu(null);
   }
@@ -386,14 +387,14 @@ export default function App() {
     const targetIds = ids.length && selected.includes(ids[0]) ? selected : ids;
     setSelected(targetIds);
     setMenu({ kind: ids.length ? 'item' : 'background', ids: targetIds,
-      x: Math.max(8, Math.min(event.clientX, window.innerWidth - 246)),
+      x: Math.max(8, Math.min(event.clientX, window.innerWidth - (ids.length ? 246 : 276))),
       y: Math.max(8, Math.min(event.clientY, window.innerHeight - (ids.length ? 370 : 205))),
     });
   }
 
   function showToolbarMenu(event, kind) {
     const rect = event.currentTarget.getBoundingClientRect(); menuTrigger.current = event.currentTarget;
-    setMenu(previous => previous?.kind === kind ? null : { kind, ids: selected, x: Math.max(8, Math.min(rect.left, window.innerWidth - 246)), y: rect.bottom + 5 });
+    setMenu(previous => previous?.kind === kind ? null : { kind, ids: selected, x: Math.max(8, Math.min(rect.left, window.innerWidth - (kind === 'new' ? 276 : 246))), y: rect.bottom + 5 });
   }
 
   function editPath() { setPathValue(currentPath); setEditingPath(true); }
@@ -482,7 +483,7 @@ export default function App() {
   });
 
   function renderNewMenu() {
-    return <><MenuItem icon="folder" disabled={!canCreate} onClick={() => beginCreate('folder')}>Folder</MenuItem><div className="menu-rule" />{FILE_KINDS.map(kind => <MenuItem key={kind.id} disabled={!canCreate} onClick={() => beginCreate(kind.id)}>{kind.label}</MenuItem>)}</>;
+    return <><MenuItem item={{ type: 'folder', name: '' }} disabled={!canCreate} onClick={() => beginCreate('folder')}>Folder</MenuItem><div className="menu-rule" /><div className="menu-caption">Choose a file type</div>{FILE_KINDS.map(kind => <MenuItem key={kind.id} item={{ type: 'file', name: kind.defaultName }} shortcut={kind.extension} disabled={!canCreate} onClick={() => beginCreate(kind.id)}>{kind.label}</MenuItem>)}<div className="menu-rule" /><MenuItem item={{ type: 'file', name: '' }} disabled={!canCreate} onClick={() => beginCreate('other')}>Other…</MenuItem></>;
   }
 
   const menuItems = menu?.ids.map(id => nodes.find(n => n.id === id)).filter(Boolean) || [];
@@ -596,7 +597,7 @@ export default function App() {
       </>}
     </main>
 
-    {menu && <div className="context-menu" style={{ left: menu.x, top: menu.y }} ref={menuRef} role="menu" aria-label={menu.kind === 'item' ? 'Item actions' : `${menu.kind} menu`} onKeyDown={event => {
+    {menu && <div className={`context-menu${['new', 'background'].includes(menu.kind) ? ' creation-menu' : ''}`} style={{ left: menu.x, top: menu.y, maxHeight: Math.max(100, window.innerHeight - menu.y - 8) }} ref={menuRef} role="menu" aria-label={menu.kind === 'item' ? 'Item actions' : `${menu.kind} menu`} onKeyDown={event => {
       if (event.key === 'Tab') { setMenu(null); return; }
       const buttons = [...menuRef.current.querySelectorAll('button:not(:disabled)')]; const index = buttons.indexOf(document.activeElement);
       if (event.key === 'ArrowDown' || event.key === 'ArrowUp') { event.preventDefault(); buttons[(index + (event.key === 'ArrowDown' ? 1 : buttons.length - 1) + buttons.length) % buttons.length]?.focus(); }
@@ -616,7 +617,15 @@ export default function App() {
       else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
     }}>
       <button className="icon-button modal-close" aria-label="Close dialog" onClick={() => setDialog(null)}><Icon name="close" size={17} /></button>
-      {(dialog.type === 'create' || dialog.type === 'rename') && <form onSubmit={submitName}><h2 id="dialog-title">{dialog.type === 'rename' ? 'Rename' : dialog.itemType === 'folder' ? 'New folder' : `New ${dialog.fileKind.label.toLowerCase()}`}</h2><p>{dialog.type === 'rename' ? 'Enter a new name.' : `Location: ${currentPath}`}</p><label className="field-label" htmlFor="item-name">Name</label><input className={`name-input ${error ? 'invalid' : ''}`} id="item-name" ref={nameRef} value={name} onChange={event => { setName(event.target.value); setError(''); }} maxLength={200} autoComplete="off" aria-describedby={error ? 'dialog-error' : undefined} />{error && <p className="field-error" id="dialog-error" role="alert">{error}</p>}<div className="modal-actions"><button type="button" className="button secondary" onClick={() => setDialog(null)}>Cancel</button><button type="submit" className="button primary">{dialog.type === 'rename' ? 'Save' : 'Create'}</button></div></form>}
+      {(dialog.type === 'create' || dialog.type === 'rename') && <form onSubmit={submitName}>
+        <h2 id="dialog-title">{dialog.type === 'rename' ? 'Rename' : dialog.itemType === 'folder' ? 'New folder' : dialog.fileKind.id === 'other' ? 'New file' : `New ${dialog.fileKind.label.toLowerCase()}`}</h2>
+        <p>{dialog.type === 'rename' ? 'Enter a new name.' : `Location: ${currentPath}`}</p>
+        <label className="field-label" htmlFor="item-name">{dialog.fileKind?.id === 'other' ? 'File name and extension' : 'Name'}</label>
+        <input className={`name-input ${error ? 'invalid' : ''}`} id="item-name" ref={nameRef} value={name} onChange={event => { setName(event.target.value); setError(''); }} maxLength={200} autoComplete="off" placeholder={dialog.fileKind?.id === 'other' ? 'e.g. name.java' : undefined} aria-describedby={error ? 'dialog-error' : dialog.type === 'create' && dialog.itemType === 'file' ? 'file-name-help' : undefined} />
+        {dialog.type === 'create' && dialog.itemType === 'file' && <div className="creation-file-preview" id="file-name-help"><ItemIcon item={{ type: 'file', name: makeFileName(name, dialog.fileKind) }} size={26} /><div><strong>{makeFileName(name, dialog.fileKind) || 'Your file name'}</strong><span>{dialog.fileKind.id === 'other' ? name.trim() ? getFileLanguage(name.trim()) : 'Include the file extension, like .java or .rb.' : `${dialog.fileKind.extension} is added automatically.`}</span></div></div>}
+        {error && <p className="field-error" id="dialog-error" role="alert">{error}</p>}
+        <div className="modal-actions"><button type="button" className="button secondary" onClick={() => setDialog(null)}>Cancel</button><button type="submit" className="button primary">{dialog.type === 'rename' ? 'Save' : 'Create'}</button></div>
+      </form>}
       {dialog.type === 'transfer' && <><h2 id="dialog-title">{dialog.mode === 'move' ? 'Move' : 'Copy'} {dialog.ids.length === 1 ? 'item' : `${dialog.ids.length} items`}</h2><p>Select a destination folder.</p><div className="destination-list" role="listbox" aria-label="Destination folder"><button className={`destination-row destination-root ${destination === null ? 'active' : ''}`} role="option" aria-selected={destination === null} onClick={() => setDestination(null)}><Icon name="drive" size={18} /><span>{ROOT_LABEL}</span>{destination === null && <Icon name="check" size={15} />}</button>{transferFolders.map(item => <button key={item.id} className={`destination-row ${destination === item.id ? 'active' : ''}`} style={{ paddingLeft: 16 + item.depth * 17 }} role="option" aria-selected={destination === item.id} disabled={item.disabled} onClick={() => { setDestination(item.id); setError(''); }}><ItemIcon item={item} size={16} /><span>{item.name}</span>{destination === item.id && <Icon name="check" size={15} />}</button>)}</div>{error && <p className="field-error" role="alert">{error}</p>}<div className="modal-actions"><button className="button secondary" onClick={() => setDialog(null)}>Cancel</button><button className="button primary" onClick={() => transfer(dialog.mode, dialog.ids, destination)}>{dialog.mode === 'move' ? 'Move here' : 'Copy here'}</button></div></>}
       {dialog.type === 'delete' && <><h2 id="dialog-title">Delete {dialog.ids.length === 1 ? 'item' : 'items'}?</h2><p>{dialog.ids.length === 1 ? `“${nodes.find(n => n.id === dialog.ids[0])?.name}” will be deleted.` : `${dialog.ids.length} selected items will be deleted.`} Folders include everything inside them. You can undo the last change.</p>{error && <p className="field-error" role="alert">{error}</p>}<div className="modal-actions"><button className="button secondary" onClick={() => setDialog(null)}>Cancel</button><button className="button danger" onClick={removeItems}>Delete</button></div></>}
       {dialog.type === 'help' && <><h2 id="dialog-title">Keyboard shortcuts</h2><div className="shortcut-list">{[['Search current folder', 'Ctrl+F / /'], ['Edit folder path', 'Alt+D'], ['New Python file', 'N'], ['New folder', 'Ctrl+Shift+N'], ['Rename', 'F2'], ['Copy / cut / paste', 'Ctrl+C / X / V'], ['Select all', 'Ctrl+A'], ['Undo', 'Ctrl+Z'], ['Delete', 'Delete'], ['Open folder / edit file', 'Enter'], ['Previous / next folder', 'Alt+Left / Right'], ['Parent folder', 'Alt+Up']].map(([label, keys]) => <div key={label}><span>{label}</span><kbd>{keys}</kbd></div>)}</div><p className="modal-footnote">Use Ctrl-click or Shift-click to select multiple items. Drag items into folders to move them; hold Ctrl or Alt to copy.</p></>}
