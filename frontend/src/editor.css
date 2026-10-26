@@ -113,24 +113,19 @@
 .editor-language-label { margin-left: auto; padding-left: 12px; color: #778591; font-size: 10px; }
 .editor-workspace { display: flex; flex: 1; min-height: 0; min-width: 0; overflow: hidden; }
 .editor-code-pane { display: flex; flex: 1; min-width: 0; min-height: 0; }
-.editor-notes-pane { display: flex; flex-direction: column; flex: 0 0 var(--notes-width); min-width: 260px; min-height: 0; overflow: hidden; background: #202124; }
-.editor-notes-heading { display: flex; align-items: center; gap: 3px; min-height: 65px; flex-shrink: 0; padding: 12px 14px; border-bottom: 1px solid #34363b; }
+.editor-notes-pane { display: flex; flex-direction: column; flex: 0 0 var(--notes-width); min-width: 260px; min-height: 0; overflow: hidden; background: #242424; }
+.editor-notes-heading { display: flex; align-items: center; gap: 3px; min-height: 65px; flex-shrink: 0; padding: 12px 14px; border-bottom: 1px solid var(--border); }
 .editor-notes-heading > div { flex: 1; min-width: 0; }
 .editor-notes-heading > div > span { display: flex; align-items: center; gap: 8px; font-size: 12px; font-weight: 600; }
-.editor-notes-heading small { display: block; margin-top: 6px; color: #8e969f; font-size: 10px; }
-.editor-notes-toggle.active { color: #b9daff; background: #2c3b4b; }
-.editor-notes-size { display: flex; align-items: center; gap: 10px; min-height: 42px; flex-shrink: 0; padding: 0 15px; border-bottom: 1px solid #303238; color: #939ca8; font-size: 10px; }
-.editor-notes-size input { width: 100%; min-width: 35px; accent-color: #75b6f0; }
-.editor-notes-size label, .editor-notes-size output { flex-shrink: 0; }
-.editor-notes-size output { width: 29px; text-align: right; font-variant-numeric: tabular-nums; }
+.editor-notes-heading small { display: block; margin-top: 6px; color: #999; font-size: 10px; }
+.editor-notes-toggle.active { color: #eee; background: #333; }
 .editor-notes-pane > .file-notes { flex: 1; min-height: 0; }
-.editor-notes-footer { flex-shrink: 0; padding: 10px 15px; border-top: 1px solid #303238; color: #818a97; font-size: 10px; }
-.editor-notes-divider { position: relative; z-index: 2; width: 5px; flex: 0 0 5px; background: #303238; cursor: col-resize; touch-action: none; }
+.editor-notes-footer { flex-shrink: 0; padding: 10px 15px; border-top: 1px solid var(--border); color: #999; font-size: 10px; }
+.editor-notes-divider { position: relative; z-index: 2; width: 5px; flex: 0 0 5px; background: #353535; cursor: col-resize; touch-action: none; }
 .editor-notes-divider:hover, .editor-notes-divider:focus-visible { outline: none; background: #6bbafa; }
 .notes-hidden .editor-notes-pane, .notes-hidden .editor-notes-divider { display: none; }
 .notes-full .editor-code-pane, .notes-full .editor-notes-divider { display: none; }
 .notes-full .editor-notes-pane { flex: 1; }
-.notes-full .editor-notes-size { display: none; }
 .editor-mobile-tabs { display: none; }
 .editor-code-actions { display: contents; }
 .editor-status-bar { display: flex; flex: 0 0 28px; align-items: center; gap: 20px; min-height: 28px; padding: 0 16px; overflow: hidden; color: #aaa; border-top: 1px solid #353535; background: #1d1d1d; font-size: 11px; white-space: nowrap; }
@@ -168,10 +163,10 @@
   .editor-code-actions > .editor-wrap-button span { display: inline; }
   .editor-save { margin-left: auto; }
   .editor-path { flex-basis: 32px; padding: 0 11px; font-size: 10px; }
-  .editor-mobile-tabs { display: flex; align-items: stretch; flex-shrink: 0; min-height: 42px; border-bottom: 1px solid #35383e; background: #202124; }
-  .editor-mobile-tabs button { display: flex; flex: 1; align-items: center; justify-content: center; gap: 7px; border-bottom: 2px solid transparent; color: #9da6b1; font-size: 12px; }
-  .editor-mobile-tabs button.active { color: #dcecff; border-bottom-color: #75b6f0; background: #252a32; }
-  .editor-workspace .editor-notes-divider, .editor-notes-size, .editor-notes-expand, .editor-notes-close { display: none; }
+  .editor-mobile-tabs { display: flex; align-items: stretch; flex-shrink: 0; min-height: 42px; border-bottom: 1px solid var(--border); background: #242424; }
+  .editor-mobile-tabs button { display: flex; flex: 1; align-items: center; justify-content: center; gap: 7px; border-bottom: 2px solid transparent; color: #aaa; font-size: 12px; }
+  .editor-mobile-tabs button.active { color: #eee; border-bottom-color: var(--accent); background: #2c2c2c; }
+  .editor-workspace .editor-notes-divider, .editor-notes-expand, .editor-notes-close { display: none; }
   .editor-workspace.mobile-code .editor-code-pane { display: flex; }
   .editor-workspace.mobile-code .editor-notes-pane { display: none; }
   .editor-workspace.mobile-notes .editor-code-pane { display: none; }
