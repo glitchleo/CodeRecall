@@ -21,6 +21,7 @@ export function SearchIcon({ name, size = 18 }) {
     copy: <><rect x="8" y="8" width="12" height="13" rx="2" /><path d="M16 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h3" /></>,
     edit: <><path d="m16 3 5 5-12 12H4v-5L16 3ZM13 6l5 5" /></>,
     plus: <path d="M12 5v14M5 12h14" />,
+    import: <><path d="M12 3v12m-4-4 4 4 4-4M4 16v5h16v-5" /></>,
     down: <path d="m7 10 5 5 5-5" />,
     drive: <><path d="M4 5h16l2 12H2L4 5Zm-2 12v4h20v-4M6 18.5h.01M9 18.5h.01" /></>,
     chevron: <path d="m9 6 6 6-6 6" />,
@@ -84,7 +85,10 @@ export default function SearchMode({ nodes, tags, query, onQuery, searchRef, tag
   function details(item) { setDetailsOnly(item.type === 'folder'); setOpenedId(item.id); }
   return <section className="find-workspace" aria-label="Find code">
     <div className="command-bar find-command-bar" role="toolbar" aria-label="Search actions">
-      <div className="find-new-wrap"><button className="toolbar-button" aria-expanded={newMenu} onClick={() => setNewMenu(value => !value)}><SearchIcon name="plus" size={16} /><span>New</span><SearchIcon name="down" size={12} /></button>{newMenu && <><button className="find-menu-dismiss" aria-label="Close new menu" onClick={() => setNewMenu(false)} /><div className="find-new-menu" role="menu" aria-label="Create a folder or file"><button role="menuitem" className="find-new-folder" onClick={() => { setNewMenu(false); onCreate('folder'); }}><ItemIcon item={{ type: 'folder', name: 'Folder' }} /><span>Folder</span></button><span className="find-new-caption">Programming files</span>{[...FILE_TEMPLATES, OTHER_FILE_TEMPLATE].map(template => <button role="menuitem" key={template.id} onClick={() => { setNewMenu(false); onCreate(template.id); }}><ItemIcon item={{ type: 'file', name: template.defaultName || 'file' }} /><span>{template.label}</span><small>{template.extension || 'name.ext'}</small></button>)}</div></>}</div>
+      <div className="find-new-wrap"><button className="toolbar-button" aria-expanded={newMenu} onClick={() => setNewMenu(value => !value)}><SearchIcon name="plus" size={16} /><span>New</span><SearchIcon name="down" size={12} /></button>{newMenu && <><button className="find-menu-dismiss" aria-label="Close new menu" onClick={() => setNewMenu(false)} /><div className="find-new-menu" role="menu" aria-label="Create a folder or file">
+        <button role="menuitem" className="find-new-folder" onClick={() => { setNewMenu(false); onCreate('folder'); }}><ItemIcon item={{ type: 'folder', name: 'Folder' }} /><span>Folder</span></button>
+        <button role="menuitem" onClick={() => { setNewMenu(false); onCreate('import'); }}><SearchIcon name="import" /><span>Import JSON…</span></button>
+        <span className="find-new-caption">Programming files</span>{[...FILE_TEMPLATES, OTHER_FILE_TEMPLATE].map(template => <button role="menuitem" key={template.id} onClick={() => { setNewMenu(false); onCreate(template.id); }}><ItemIcon item={{ type: 'file', name: template.defaultName || 'file' }} /><span>{template.label}</span><small>{template.extension || 'name.ext'}</small></button>)}</div></>}</div>
       <span className="toolbar-separator" />
       <TagPicker label="Filter tags" tags={tags} selectedIds={tagFilter} onToggle={onToggleFilter} onCreate={name => onCreateTag(name)} />
       <span className="toolbar-separator" />

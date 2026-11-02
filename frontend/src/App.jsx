@@ -8,6 +8,7 @@ import { createTag, assignFileTags, decodeLibrary, encodeLibrary, getFileTags, m
 import ItemIcon from './ItemIcon.jsx';
 import SearchMode, { SearchIcon } from './SearchMode.jsx';
 import MetadataPanel from './MetadataPanel.jsx';
+import ImportLibrary from './ImportLibrary.jsx';
 const CloudLibrary = lazy(() => import('./CloudLibrary.jsx'));
 
 const STORAGE_KEY = 'coderecall.library.v1';
@@ -51,6 +52,7 @@ function Icon({ name, size = 17, ...props }) {
     details: <><rect x="2" y="4" width="20" height="16" rx="2" /><path d="M15 4v16M18 8h1M18 12h1M18 16h1" /></>,
     undo: <path d="M4 10h10a6 6 0 0 1 0 12M9 5l-5 5 5 5" />,
     tag: <><path d="M3 3h8l10 10-8 8L3 11Z" /><circle cx="7" cy="7" r="1" /></>,
+    import: <><path d="M12 3v12m-4-4 4 4 4-4M4 16v5h16v-5" /></>,
   };
   return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" {...props}>{paths[name] || paths.file}</svg>;
 }
@@ -90,6 +92,7 @@ export default function App() {
   const [clipboard, setClipboard] = useState(null);
   const [menu, setMenu] = useState(null);
   const [dialog, setDialog] = useState(null);
+  const [importDestination, setImportDestination] = useState(null);
   const [name, setName] = useState('');
   const [error, setError] = useState('');
   const [destination, setDestination] = useState(null);
@@ -178,7 +181,7 @@ export default function App() {
   }
 
   function changeNodes(next, message) {
-    setUndo(nodes); setNodes(next);
+    setUndo(library); setNodes(next);
     if (message) notify(message, true);
   }
 
@@ -254,8 +257,34 @@ export default function App() {
 
   function undoChange() {
     if (!undo) return;
-    setNodes(undo); setUndo(null); setSelected([]); setMenu(null);
-    notify('Last change undone.');
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(undo));
+      setLibrary(undo); setStorageError(false); setUndo(null); setSelected([]); setMenu(null);
+      setTagFilter(current => current.filter(id => undo.tags.some(tag => tag.id === id)));
+      selectionAnchor.current = null;
+      notify('Last change undone.');
+    } catch (err) { notify(`Could not undo this change. ${err.message}`); }
+  }
+
+  function beginImport() {
+    setMenu(null); setDialog(null); setSidebarOpen(false);
+    setImportDestination({ parentId: folderId, label: currentPath });
+  }
+
+  function applyImport(plan) {
+    try {
+      if (editorFile) throw new Error('Save and close the editor before importing.');
+      if (plan.baseLibrary !== library) throw new Error('Your library changed. Review the updated import before continuing.');
+      const next = decodeLibrary(plan.library);
+      if (!next) throw new Error('This import contains invalid files, folders, or tags.');
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+      setUndo(library); setLibrary(next); setStorageError(false);
+      setSelected(plan.importedIds); setQuery(''); setTagFilter([]); setClipboard(null);
+      setImportDestination(null);
+      const { filesAdded, filesUpdated, foldersAdded } = plan.summary;
+      notify(`Imported ${filesAdded} new ${filesAdded === 1 ? 'file' : 'files'}, ${foldersAdded} new ${foldersAdded === 1 ? 'folder' : 'folders'}${filesUpdated ? `, updated ${filesUpdated} ${filesUpdated === 1 ? 'file' : 'files'}` : ''}.`, true);
+      return { ok: true };
+    } catch (err) { return { ok: false, message: `Could not import. ${err.message}` }; }
   }
 
   function clearTransientState() {
@@ -319,6 +348,7 @@ export default function App() {
   }
 
   function beginCreate(kind) {
+    if (kind === 'import') { beginImport(); return; }
     if (!canCreate) return;
     const fileKind = kind === 'folder' ? null : kind === 'other' ? OTHER_FILE_TEMPLATE : FILE_KINDS.find(item => item.id === kind) ?? FILE_KINDS[0];
     setName(kind === 'folder' ? 'New folder' : fileKind.defaultName);
@@ -450,7 +480,8 @@ export default function App() {
   useEffect(() => {
     function handleKey(event) {
       if (editorFile) return;
-      if (event.target instanceof Element && event.target.closest('[data-tag-picker], [data-metadata], [data-item-viewer], [data-cloud-library], [data-icon-picker]')) return;
+      if (importDestination) return;
+      if (event.target instanceof Element && event.target.closest('[data-tag-picker], [data-metadata], [data-item-viewer], [data-cloud-library], [data-icon-picker], [data-import-library]')) return;
       const editable = event.target instanceof HTMLElement && (['INPUT', 'TEXTAREA', 'SELECT'].includes(event.target.tagName) || event.target.isContentEditable);
       const mod = event.ctrlKey || event.metaKey; const key = event.key.toLowerCase();
       if (event.key === 'Escape') {
@@ -483,7 +514,7 @@ export default function App() {
   });
 
   function renderNewMenu() {
-    return <><MenuItem item={{ type: 'folder', name: '' }} disabled={!canCreate} onClick={() => beginCreate('folder')}>Folder</MenuItem><div className="menu-rule" /><div className="menu-caption">Choose a file type</div>{FILE_KINDS.map(kind => <MenuItem key={kind.id} item={{ type: 'file', name: kind.defaultName }} shortcut={kind.extension} disabled={!canCreate} onClick={() => beginCreate(kind.id)}>{kind.label}</MenuItem>)}<div className="menu-rule" /><MenuItem item={{ type: 'file', name: '' }} disabled={!canCreate} onClick={() => beginCreate('other')}>Other…</MenuItem></>;
+    return <><MenuItem item={{ type: 'folder', name: '' }} disabled={!canCreate} onClick={() => beginCreate('folder')}>Folder</MenuItem><MenuItem icon="import" onClick={beginImport}>Import JSON…</MenuItem><div className="menu-rule" /><div className="menu-caption">Choose a file type</div>{FILE_KINDS.map(kind => <MenuItem key={kind.id} item={{ type: 'file', name: kind.defaultName }} shortcut={kind.extension} disabled={!canCreate} onClick={() => beginCreate(kind.id)}>{kind.label}</MenuItem>)}<div className="menu-rule" /><MenuItem item={{ type: 'file', name: '' }} disabled={!canCreate} onClick={() => beginCreate('other')}>Other…</MenuItem></>;
   }
 
   const menuItems = menu?.ids.map(id => nodes.find(n => n.id === id)).filter(Boolean) || [];
@@ -630,6 +661,7 @@ export default function App() {
       {dialog.type === 'delete' && <><h2 id="dialog-title">Delete {dialog.ids.length === 1 ? 'item' : 'items'}?</h2><p>{dialog.ids.length === 1 ? `“${nodes.find(n => n.id === dialog.ids[0])?.name}” will be deleted.` : `${dialog.ids.length} selected items will be deleted.`} Folders include everything inside them. You can undo the last change.</p>{error && <p className="field-error" role="alert">{error}</p>}<div className="modal-actions"><button className="button secondary" onClick={() => setDialog(null)}>Cancel</button><button className="button danger" onClick={removeItems}>Delete</button></div></>}
       {dialog.type === 'help' && <><h2 id="dialog-title">Keyboard shortcuts</h2><div className="shortcut-list">{[['Search current folder', 'Ctrl+F / /'], ['Edit folder path', 'Alt+D'], ['New Python file', 'N'], ['New folder', 'Ctrl+Shift+N'], ['Rename', 'F2'], ['Copy / cut / paste', 'Ctrl+C / X / V'], ['Select all', 'Ctrl+A'], ['Undo', 'Ctrl+Z'], ['Delete', 'Delete'], ['Open folder / edit file', 'Enter'], ['Previous / next folder', 'Alt+Left / Right'], ['Parent folder', 'Alt+Up']].map(([label, keys]) => <div key={label}><span>{label}</span><kbd>{keys}</kbd></div>)}</div><p className="modal-footnote">Use Ctrl-click or Shift-click to select multiple items. Drag items into folders to move them; hold Ctrl or Alt to copy.</p></>}
     </section></div>}
+    {importDestination && <ImportLibrary library={library} parentId={importDestination.parentId} destinationLabel={importDestination.label} onImport={applyImport} onClose={() => setImportDestination(null)} />}
     {!editorFile && toast && <div className="toast" role="status"><span className="toast-check"><Icon name="check" size={14} /></span><span>{toast.message}</span>{toast.canUndo && undo && <button onClick={undoChange}>Undo</button>}<button className="toast-close" aria-label="Dismiss notification" onClick={() => setToast(null)}><Icon name="close" size={14} /></button></div>}
   </div>;
 }

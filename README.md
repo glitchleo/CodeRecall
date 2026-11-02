@@ -41,9 +41,15 @@ Explorer's compact search matches item names and their own tags, with `#name` fo
 
 For a production build, run `npm run build`, then `npm start`. Express serves the built interface and API together at http://localhost:8000 (or the configured `PORT`).
 
+## Import JSON and AI edits
+
+Choose **New → Import JSON…** in either mode to drop or select a JSON file containing a folder/file tree, complete code, descriptions/notes, and tags. The dialog includes a downloadable example and shows new, updated, and unchanged items before saving into the current folder. Matching paths merge; existing files at those paths update, while unrelated files remain. Tag names reuse the existing catalog regardless of capitalization, so `Python` and `python` share one tag. **Undo** restores files, folders, notes, and the previous tag catalog together.
+
+Use the portable format in [the import guide](docs/IMPORT_FORMAT.md) when asking an AI to create or edit code. It includes a reusable prompt, formatted notes, merge rules, and limits. Native version 2 JSON backups can also be merged through this dialog.
+
 ## Accounts and backups
 
-**Account & backup** provides local JSON export/import without any account. Imports and cloud downloads require a concrete replacement confirmation and save one previous local library for recovery. Cloud is optional: set the `VITE_SUPABASE_URL` and `VITE_SUPABASE_PUBLISHABLE_KEY` variables and apply the included SQL migrations to enable email/password accounts, profiles, and private cloud snapshots.
+**Account & backup** provides local JSON backup export/restore without any account. Restoring a backup here, or downloading a cloud library, requires a concrete replacement confirmation and saves one previous local library for recovery. Use **New → Import JSON…** to merge instead. Cloud is optional: set the `VITE_SUPABASE_URL` and `VITE_SUPABASE_PUBLISHABLE_KEY` variables and apply the included SQL migrations to enable email/password accounts, profiles, and private cloud snapshots.
 
 Signing in never transfers data automatically. Upload your saved library on one device, then download it on another. Revision checks reject stale uploads rather than silently overwriting a newer snapshot. Cloud snapshots are limited to 4 MiB; no per-file merge or background sync is included. Authentication and library transfers use the Supabase browser SDK directly. Never use a secret/service-role key in browser variables.
 

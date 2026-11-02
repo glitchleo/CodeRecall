@@ -1,0 +1,35 @@
+{
+  "format": "coderecall-import",
+  "version": 1,
+  "items": [
+    {
+      "type": "folder",
+      "name": "Python examples",
+      "description": "Small examples to read, edit, and reuse.",
+      "tags": ["Python"],
+      "children": [
+        {
+          "type": "file",
+          "name": "greeting.py",
+          "content": "def greet(name):\n    return f\"Hello, {name}!\"\n\n\nprint(greet(\"CodeRecall\"))\n",
+          "description": "A reusable greeting\n\nThe greet function accepts a name and returns a greeting. The last line prints an example.",
+          "tags": ["python", "Functions"]
+        },
+        {
+          "type": "folder",
+          "name": "Utilities",
+          "tags": ["Functions"],
+          "children": [
+            {
+              "type": "file",
+              "name": "add.py",
+              "content": "def add(a, b):\n    return a + b\n",
+              "description": "Adds two values and returns their sum.",
+              "tags": ["Python", "Math"]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
