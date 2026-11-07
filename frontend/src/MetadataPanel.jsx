@@ -5,7 +5,7 @@ import { getFileTags } from './lib/tags.js';
 import FileNotes from './FileNotes.jsx';
 import { notesFromItem, equalNotes } from './lib/notes.js';
 
-const MetadataPanel = forwardRef(function MetadataPanel({ item, tags, onSave, onToggleTag, onCreateTag }, ref) {
+const MetadataPanel = forwardRef(function MetadataPanel({ item, tags, onSave, onToggleTag, onCreateTag, resolveLink, onOpenLink }, ref) {
   const [description, setDescription] = useState(item.description || '');
   const [notes, setNotes] = useState(() => notesFromItem(item));
   const [message, setMessage] = useState('');
@@ -27,7 +27,7 @@ const MetadataPanel = forwardRef(function MetadataPanel({ item, tags, onSave, on
         if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') { event.preventDefault(); save(notes); }
       }} onBlur={event => {
         if (!event.currentTarget.contains(event.relatedTarget) && dirty) save(notes);
-      }}><FileNotes value={notes} label="File description" onChange={next => { setNotes(next); setMessage(''); }} /></div> : <textarea id={`description-${item.id}`} value={description} maxLength={4000} rows={4}
+      }}><FileNotes value={notes} resolveLink={resolveLink} onOpenLink={onOpenLink} label="File description" onChange={next => { setNotes(next); setMessage(''); }} /></div> : <textarea id={`description-${item.id}`} value={description} maxLength={4000} rows={4}
         placeholder="Add a description"
         onChange={event => { setDescription(event.target.value); setMessage(''); }}
         onKeyDown={event => { if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') { event.preventDefault(); save({ description }); } }}

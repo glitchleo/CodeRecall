@@ -1,5 +1,5 @@
 import React, { forwardRef, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { createEditorState, recordEdit, undoEdit, redoEdit, selectEditorRange, indentSelection, insertLineBreak, normalizeLineEndings } from './lib/editor.js';
+import { createEditorState, recordEdit, undoEdit, redoEdit, selectEditorRange, indentSelection, insertLineBreak, normalizeLineEndings, parseCopySections, completeCopySection } from './lib/editor.js';
 import TagPicker, { TagBadges } from './TagPicker.jsx';
 import ItemIcon from './ItemIcon.jsx';
 import FileNotes from './FileNotes.jsx';
@@ -24,12 +24,28 @@ function EditorIcon({ name, size = 17 }) {
   return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{paths[name]}</svg>;
 }
 
+async function copyText(value) {
+  try {
+    if (navigator.clipboard?.writeText) { await navigator.clipboard.writeText(value); return true; }
+  } catch { /* fall through to the legacy path */ }
+  const area = document.createElement('textarea');
+  area.value = value;
+  area.setAttribute('readonly', '');
+  area.style.cssText = 'position:fixed;top:0;opacity:0';
+  document.body.appendChild(area);
+  area.select();
+  let ok = false;
+  try { ok = document.execCommand('copy'); } catch { ok = false; }
+  area.remove();
+  return ok;
+}
+
 function byteLabel(text) {
   const size = new TextEncoder().encode(text).length;
   return size < 1024 ? `${size} B` : `${(size / 1024).toLocaleString(undefined, { maximumFractionDigits: 1 })} KB`;
 }
 
-const CodeEditor = forwardRef(function CodeEditor({ file, path, onSave, onClose, onDirtyChange, persistenceError = false, tags = [], onToggleTag, onCreateTag }, ref) {
+const CodeEditor = forwardRef(function CodeEditor({ file, path, onSave, onClose, onDirtyChange, persistenceError = false, tags = [], onToggleTag, onCreateTag, resolveLink, onOpenLink, backLabel = 'Back to files' }, ref) {
   // A textarea uses LF offsets. Normalize the draft and its saved comparison
   // together; opening a CRLF file alone never marks it dirty or saves it.
   const initialText = normalizeLineEndings(typeof file.content === 'string' ? file.content : '');
@@ -54,6 +70,10 @@ const CodeEditor = forwardRef(function CodeEditor({ file, path, onSave, onClose,
   const workspaceRef = useRef(null);
   const gutterRef = useRef(null);
   const mirrorRef = useRef(null);
+  const railRef = useRef(null);
+  const layerRef = useRef(null);
+  const copiedTimerRef = useRef(0);
+  const [copiedSection, setCopiedSection] = useState(null);
   const dialogRef = useRef(null);
   const cancelRef = useRef(null);
   const pendingCloseRef = useRef(null);
@@ -61,6 +81,8 @@ const CodeEditor = forwardRef(function CodeEditor({ file, path, onSave, onClose,
   const restoringRef = useRef(false);
   const closeRef = useRef(onClose);
   const dirtyCallbackRef = useRef(onDirtyChange);
+  const openLinkRef = useRef(onOpenLink);
+  openLinkRef.current = onOpenLink;
   closeRef.current = onClose;
   dirtyCallbackRef.current = onDirtyChange;
 
@@ -72,6 +94,12 @@ const CodeEditor = forwardRef(function CodeEditor({ file, path, onSave, onClose,
   const lines = useMemo(() => normalizeLineEndings(text).split('\n'), [text]);
   const cursorLines = normalizeLineEndings(text.slice(0, history.present.end)).split('\n');
   const language = getFileLanguage(file.name);
+  const { sections, orphans } = useMemo(() => parseCopySections(text), [text]);
+  const lineTops = useMemo(() => {
+    const tops = [0];
+    for (let index = 0; index < lines.length; index += 1) tops.push(tops[index] + (wrap ? lineHeights[index] || 22 : 22));
+    return tops;
+  }, [lines, wrap, lineHeights]);
   const assignedTags = tags.filter((tag) => file.tagIds?.includes(tag.id));
 
   const focusInput = useCallback(() => inputRef.current?.focus({ preventScroll: true }), []);
@@ -161,6 +189,22 @@ const CodeEditor = forwardRef(function CodeEditor({ file, path, onSave, onClose,
 
   useImperativeHandle(ref, () => ({ requestClose }), [requestClose]);
 
+  // Following a note reference leaves this file: unsaved work gets the usual Save / Discard / Cancel prompt first.
+  const followLink = useCallback((target) => {
+    requestClose(() => openLinkRef.current?.(target, file.id));
+  }, [requestClose, file.id]);
+
+  const copySection = async (section) => {
+    if (!section.code) return;
+    const ok = await copyText(section.code);
+    focusInput();
+    if (!ok) { setSaveError('Could not copy to the clipboard. Select the section and copy it manually.'); return; }
+    setCopiedSection(section.start);
+    window.clearTimeout(copiedTimerRef.current);
+    copiedTimerRef.current = window.setTimeout(() => setCopiedSection(null), 1400);
+  };
+  useEffect(() => () => window.clearTimeout(copiedTimerRef.current), []);
+
   const cancelClose = useCallback(() => {
     pendingCloseRef.current = null;
     setShowUnsaved(false);
@@ -234,7 +278,13 @@ const CodeEditor = forwardRef(function CodeEditor({ file, path, onSave, onClose,
     const input = event.target;
     const inputType = event.nativeEvent.inputType || '';
     const group = inputType.startsWith('delete') ? 'delete' : inputType === 'insertText' ? 'typing' : null;
-    edit({ text: input.value, start: input.selectionStart, end: input.selectionEnd }, group);
+    const typed = { text: input.value, start: input.selectionStart, end: input.selectionEnd };
+    edit(typed, group);
+    // Typing the ">" of <copy-sec> on its own line adds the blank line and closing tag as a separate undo step.
+    if (inputType === 'insertText' && event.nativeEvent.data === '>') {
+      const completed = completeCopySection(typed.text, typed.start, typed.end);
+      if (completed) edit(completed);
+    }
   };
 
   const handleKeyDown = (event) => {
@@ -295,17 +345,20 @@ const CodeEditor = forwardRef(function CodeEditor({ file, path, onSave, onClose,
     // Translate instead of scrolling the gutter: its viewport has no horizontal
     // scrollbar, so its native maximum scroll offset can be shorter than the input.
     if (gutterRef.current?.firstElementChild) gutterRef.current.firstElementChild.style.transform = `translateY(${-input.scrollTop}px)`;
+    for (const holder of [railRef.current, layerRef.current]) {
+      if (holder?.firstElementChild) holder.firstElementChild.style.transform = `translateY(${-input.scrollTop}px)`;
+    }
     if (highlightRef.current) {
       highlightRef.current.scrollTop = input.scrollTop;
       highlightRef.current.scrollLeft = input.scrollLeft;
     }
   };
 
-  useLayoutEffect(() => { if (inputRef.current) syncScroll(inputRef.current); }, [text, wrap, wrapWidth, notesMode, mobilePane]);
+  useLayoutEffect(() => { if (inputRef.current) syncScroll(inputRef.current); }, [text, wrap, wrapWidth, notesMode, mobilePane, sections.length]);
 
   return <section className="code-editor" aria-label={`Editing ${file.name}`}>
     <div className="editor-command-bar">
-      <button className="editor-toolbar-button editor-back" aria-label="Back to files" title="Back to files" onClick={() => requestClose()}><EditorIcon name="back" /><span>Back to files</span></button>
+      <button className="editor-toolbar-button editor-back" aria-label={backLabel} title={backLabel} onClick={() => requestClose()}><EditorIcon name="back" /><span>{backLabel}</span></button>
       <span className="editor-separator" />
       <div className="editor-file-name" title={file.name}><ItemIcon item={{ ...file, iconId: '' }} size={19} /><span className="editor-name-label">{file.name}</span>{dirty && <span className="editor-dirty-dot" aria-label="Unsaved changes" />}</div>
       <div className="editor-command-spacer" />
@@ -321,7 +374,7 @@ const CodeEditor = forwardRef(function CodeEditor({ file, path, onSave, onClose,
       <button className={`editor-toolbar-button editor-notes-toggle${notesMode !== 'hidden' ? ' active' : ''}`} aria-label={notesMode === 'hidden' ? 'Show notes panel' : 'Hide notes panel'} aria-expanded={notesMode !== 'hidden'} aria-controls="editor-file-notes" title="Toggle file notes" onClick={() => setNotesMode(current => current === 'hidden' ? 'split' : 'hidden')}><EditorIcon name="notes" /><span>Notes</span></button>
       </div>
     </div>
-    <div className="editor-path" title={path}><ItemIcon item={{ ...file, iconId: '' }} size={14} /><span>{path || file.name}</span><span className="editor-language-label">{language}</span></div>
+    <div className="editor-path" title={path}><ItemIcon item={{ ...file, iconId: '' }} size={14} /><span>{path || file.name}</span><button type="button" className="editor-copy-path" title="Copy this file's path to paste into a note link" onClick={async () => { await copyText(path || file.name); focusInput(); }}>Copy path</button><span className="editor-language-label">{language}</span></div>
     {assignedTags.length > 0 && <div className="editor-tags-row"><TagBadges tags={assignedTags} /></div>}
     {!showUnsaved && visibleSaveError && <div className="editor-save-error" role="alert">{visibleSaveError}</div>}
     <div className="editor-mobile-tabs" aria-label="Editor view"><button className={mobilePane === 'code' ? 'active' : ''} aria-pressed={mobilePane === 'code'} onClick={() => setMobilePane('code')}><EditorIcon name="file" size={15} />Code</button><button className={mobilePane === 'notes' ? 'active' : ''} aria-pressed={mobilePane === 'notes'} onClick={() => { setMobilePane('notes'); if (notesMode === 'hidden') setNotesMode('split'); }}><EditorIcon name="notes" size={15} />Notes & description</button></div>
@@ -331,7 +384,21 @@ const CodeEditor = forwardRef(function CodeEditor({ file, path, onSave, onClose,
       <div className="editor-gutter" ref={gutterRef} aria-hidden="true" style={{ width: `${Math.max(3, String(lines.length).length) + 2}ch` }}>
         <div className="editor-line-numbers">{lines.map((_, index) => <div key={index} className={index === cursorLines.length - 1 ? 'current-line-number' : undefined} style={wrap ? { height: lineHeights[index] || 22 } : undefined}>{index + 1}</div>)}</div>
       </div>
+      {sections.length > 0 && <div className="editor-copy-rail" ref={railRef}>
+        <div className="editor-copy-rail-inner">{sections.map((section) => <div key={section.start} className="editor-copy-rail-section" style={{ top: 16 + lineTops[section.start], height: lineTops[section.end + 1] - lineTops[section.start] }}>
+          <button type="button" className={`editor-copy-section${copiedSection === section.start ? ' copied' : ''}`} disabled={!section.code}
+            style={{ height: lineTops[section.start + 1] - lineTops[section.start] }}
+            aria-label={section.code ? `Copy section, lines ${section.start + 2} to ${section.end}` : 'Copy section (empty)'} title={section.code ? 'Copy this section (without the tags)' : 'This section is empty'}
+            onMouseDown={(event) => event.preventDefault()} onClick={() => copySection(section)}>{copiedSection === section.start ? '✓' : 'c'}</button>
+        </div>)}</div>
+      </div>}
       <div className="editor-text-area">
+        {sections.length > 0 && <div className="editor-section-layer" ref={layerRef} aria-hidden="true">
+          <div className="editor-section-layer-inner">{sections.map((section) => <div key={section.start} className="editor-section-box" style={{ top: 16 + lineTops[section.start], height: lineTops[section.end + 1] - lineTops[section.start] }}>
+            <span className="editor-section-head" style={{ height: lineTops[section.start + 1] - lineTops[section.start] }} />
+            <span className="editor-section-foot" style={{ height: lineTops[section.end + 1] - lineTops[section.end] }} />
+          </div>)}</div>
+        </div>}
         <pre ref={highlightRef} className={`editor-highlight${wrap ? ' editor-highlight-wrapped' : ''}`} aria-hidden="true" style={wrapWidth ? { width: wrapWidth + 32 } : undefined}><code><CodeTokens code={text + '\n'} filename={file.name} /></code></pre>
         <textarea
           ref={inputRef}
@@ -356,12 +423,13 @@ const CodeEditor = forwardRef(function CodeEditor({ file, path, onSave, onClose,
     <div className="editor-notes-divider" role="separator" tabIndex={notesMode === 'split' ? 0 : -1} aria-label="Resize notes panel" aria-orientation="vertical" aria-valuemin={25} aria-valuemax={70} aria-valuenow={notesWidth} onKeyDown={event => { if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') { event.preventDefault(); setNotesWidth(width => Math.min(70, Math.max(25, width + (event.key === 'ArrowLeft' ? 2 : -2)))); } }} onPointerDown={event => { event.preventDefault(); event.currentTarget.setPointerCapture(event.pointerId); }} onPointerMove={event => { if (event.currentTarget.hasPointerCapture(event.pointerId)) resizeNotes(event.clientX); }} onPointerUp={event => { if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId); }} />
     <aside id="editor-file-notes" className="editor-notes-pane" aria-label="File notes and description">
       <header className="editor-notes-heading"><div><span><EditorIcon name="notes" size={15} />File notes</span><small>Description & explanation</small></div><button className="editor-toolbar-button editor-icon-button editor-notes-expand" aria-label={notesMode === 'full' ? 'Show code and notes' : 'Expand notes to full width'} title={notesMode === 'full' ? 'Show code and notes' : 'Expand notes to full width'} onClick={() => setNotesMode(mode => mode === 'full' ? 'split' : 'full')}><EditorIcon name={notesMode === 'full' ? 'split' : 'expand'} size={15} /></button><button className="editor-toolbar-button editor-icon-button editor-notes-close" aria-label="Close notes panel" title="Close notes panel" onClick={() => setNotesMode('hidden')}><EditorIcon name="close" size={15} /></button></header>
-      <FileNotes value={notes} onChange={updateNotes} label={`Notes for ${file.name}`} />
+      <FileNotes value={notes} onChange={updateNotes} resolveLink={resolveLink} onOpenLink={onOpenLink ? followLink : undefined} label={`Notes for ${file.name}`} />
       <footer className="editor-notes-footer">Notes save with this file · Ctrl / ⌘ S</footer>
     </aside>
     </div>
     <div className="editor-status-bar">
       <span className={dirty ? 'editor-unsaved-status' : 'editor-saved-status'} role="status">{dirty ? 'Unsaved changes' : 'Saved'}</span>
+      {orphans.length > 0 && <span className="editor-section-warning" title={`Unmatched copy-sec tag on line ${orphans[0] + 1}. Add the matching opening or closing tag.`}>Unmatched copy-sec tag</span>}
       <span className="editor-status-spacer" />
       <span>Ln {cursorLines.length}, Col {cursorLines[cursorLines.length - 1].length + 1}</span>
       <span>{lines.length} {lines.length === 1 ? 'line' : 'lines'}</span>

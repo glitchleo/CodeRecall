@@ -138,3 +138,77 @@ export function insertLineBreak(text, start, end) {
   const caret = start + inserted.length;
   return { text: text.slice(0, start) + inserted + text.slice(end), start: caret, end: caret };
 }
+
+/* ------------------------------------------------------------------ *
+ * Copy sections: <copy-sec> ... </copy-sec>
+ *
+ * The tags live inside the file content itself, so saving, JSON export,
+ * JSON import, cloud backups and copies all keep them with no extra storage.
+ * A tag must be alone on its line. It may sit inside a line comment so the
+ * file stays valid code:  // <copy-sec>   # <copy-sec>   <!-- <copy-sec> -->
+ * ------------------------------------------------------------------ */
+const COPY_TAG = /^([ \t]*)((?:\/\/|#|--|;|%|\/\*|<!--)[ \t]*)?<(\/?)copy-sec>(?:[ \t]*(\*\/|-->))?[ \t]*$/;
+const COMMENT_END = { "/*": "*/", "<!--": "-->" };
+
+/** Pairs each closing tag with the nearest opening tag above it. Sections never nest. */
+export function parseCopySections(text = "") {
+  const lines = normalizeLineEndings(text).split("\n");
+  const sections = [];
+  const orphans = [];
+  let open = null;
+  lines.forEach((line, index) => {
+    const match = COPY_TAG.exec(line);
+    if (!match) return;
+    if (!match[3]) {
+      if (open !== null) orphans.push(open);
+      open = index;
+    } else if (open === null) {
+      orphans.push(index);
+    } else {
+      sections.push({ start: open, end: index, code: lines.slice(open + 1, index).join("\n") });
+      open = null;
+    }
+  });
+  if (open !== null) orphans.push(open);
+  return { sections, orphans: orphans.sort((a, b) => a - b) };
+}
+
+/** The code a section's copy button copies: everything between the two tag lines. */
+export function copySectionText(section) {
+  return section.code;
+}
+
+/** Remove the tag lines of complete sections, e.g. when copying a whole file. */
+export function stripCopySectionTags(text = "") {
+  const normalized = normalizeLineEndings(text);
+  const { sections } = parseCopySections(normalized);
+  if (!sections.length) return normalized;
+  const drop = new Set(sections.flatMap((section) => [section.start, section.end]));
+  return normalized.split("\n").filter((_, index) => !drop.has(index)).join("\n");
+}
+
+/**
+ * Call right after the user typed ">". If the caret now ends an opening tag that
+ * stands alone on its line, return the text with a blank line and a closing tag added.
+ * Returns null (do nothing) when the user is clearly wrapping existing code instead:
+ * code directly below the tag, or a closing tag below that already pairs with it.
+ */
+export function completeCopySection(text, start, end) {
+  ({ text, start, end } = selection(text, start, end));
+  if (start !== end || text[start - 1] !== ">") return null;
+  const lineStart = start === 0 ? 0 : text.lastIndexOf("\n", start - 1) + 1;
+  let lineEnd = text.indexOf("\n", start);
+  if (lineEnd === -1) lineEnd = text.length;
+  const match = COPY_TAG.exec(text.slice(lineStart, start));
+  if (!match || match[3] || text.slice(start, lineEnd).trim() !== "") return null;
+  const nextLine = lineEnd < text.length ? text.slice(lineEnd + 1).split("\n", 1)[0] : "";
+  if (nextLine.trim() !== "") return null;
+  const lineIndex = text.slice(0, lineStart).split("\n").length - 1;
+  if (parseCopySections(text).sections.some((section) => section.start === lineIndex)) return null;
+  const [, indent, lead = "", , suffix] = match;
+  const closeComment = suffix ?? COMMENT_END[lead.trim()] ?? "";
+  const openerTail = suffix === undefined && closeComment ? ` ${closeComment}` : "";
+  const closer = `${indent}${lead}</copy-sec>${closeComment ? ` ${closeComment}` : ""}`;
+  const caret = start + openerTail.length + 1 + indent.length;
+  return { text: `${text.slice(0, start)}${openerTail}\n${indent}\n${closer}${text.slice(lineEnd)}`, start: caret, end: caret };
+}

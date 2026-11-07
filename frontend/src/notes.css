@@ -30,3 +30,21 @@
   .notes-size-label select { height: 34px; font-size: 14px; }
   .notes-editable { padding: 20px 18px; }
 }
+
+/* Font step buttons */
+.notes-format-toolbar .notes-step-button { width: 34px; font: 600 12px 'Segoe UI', system-ui, sans-serif; }
+.notes-format-toolbar .notes-step-button:disabled { opacity: .35; cursor: default; background: transparent; }
+.notes-format-toolbar .notes-link-button { display: inline-flex; align-items: center; justify-content: center; }
+
+/* File references inside notes */
+.notes-editable .notes-link { display: inline; padding: 0 5px; margin: 0 1px; border-radius: 4px; color: #a8d8ff; background: #243746; border-bottom: 1px solid #4d7ea8; cursor: pointer; user-select: all; }
+.notes-editable .notes-link:hover { background: #2d4a60; color: #cde9ff; }
+.notes-editable .notes-link:focus-visible { outline: 2px solid #6bbafa; outline-offset: 1px; }
+.notes-link-bar { display: flex; flex: 0 0 auto; flex-wrap: wrap; align-items: center; gap: 6px; padding: 8px 14px; border-bottom: 1px solid #353535; background: #1f2a33; }
+.notes-link-bar input { flex: 1 1 180px; min-width: 0; height: 30px; padding: 0 9px; border: 1px solid #4d7ea8; border-radius: 5px; color: #ddd; background: #1e1e1e; font: 12px Consolas, 'SFMono-Regular', monospace; }
+.notes-link-bar input:focus-visible { outline: 2px solid #6bbafa; outline-offset: 1px; }
+.notes-link-bar button { height: 30px; padding: 0 11px; border: 1px solid #525252; border-radius: 5px; color: #ddd; background: #333; font-size: 12px; }
+.notes-link-bar button:hover:not(:disabled) { background: #414141; }
+.notes-link-bar .notes-link-add:not(:disabled) { color: #111; border-color: #6bbafa; background: #6bbafa; }
+.notes-link-bar button:disabled { opacity: .45; }
+.notes-link-error { flex: 1 0 100%; color: #ffbdb4; font-size: 11px; line-height: 1.5; }
