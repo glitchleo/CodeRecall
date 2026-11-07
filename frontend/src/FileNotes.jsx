@@ -152,6 +152,29 @@ export default function FileNotes({ value, onChange, readOnly = false, label = '
     if (size) setActive(current => ({ ...current, fontSize: size }));
   };
 
+  const changeFontSize = (direction) => {
+  const sizes = NOTES_FONT_SIZES;
+
+  // Find the current font size in the supported sizes array.
+  const currentIndex = sizes.indexOf(active.fontSize);
+
+  // Use the default size if the current size isn't found.
+  const safeIndex = currentIndex >= 0
+    ? currentIndex
+    : sizes.indexOf(DEFAULT_NOTES_FONT_SIZE);
+
+  // Calculate the next size and prevent going outside the limits.
+  const nextIndex = Math.max(
+    0,
+    Math.min(safeIndex + direction, sizes.length - 1)
+  );
+
+  // Apply the new font size.
+  if (nextIndex !== safeIndex) {
+    format('fontSize', sizes[nextIndex]);
+  }
+};
+
   const pastePlainText = event => {
     event.preventDefault();
     const selection = window.getSelection();
@@ -164,10 +187,41 @@ export default function FileNotes({ value, onChange, readOnly = false, label = '
 
   return <div className={`file-notes${readOnly ? ' file-notes-readonly' : ''}`}>
     {!readOnly && <div className="notes-format-toolbar" role="toolbar" aria-label="Note formatting">
-      <label className="notes-size-label"><span className="notes-sr-only">Note font size</span><select aria-label="Note font size" value={active.fontSize}
-        onMouseDown={captureSelection} onChange={event => format('fontSize', Number(event.target.value))}>
-        {NOTES_FONT_SIZES.map(size => <option key={size} value={size}>{size} px</option>)}
-      </select></label>
+      <button
+  type="button"
+  className="notes-size-arrow"
+  title="Decrease font size"
+  aria-label="Decrease font size"
+  disabled={active.fontSize === NOTES_FONT_SIZES[0]}
+  onMouseDown={event => {
+    event.preventDefault();
+    captureSelection();
+  }}
+  onClick={() => changeFontSize(-1)}
+>
+  ↓
+</button>
+
+{/* Current font size */}
+<span className="notes-size-label">
+  {active.fontSize}px
+</span>
+
+{/* Increase font size */}
+<button
+  type="button"
+  className="notes-size-arrow"
+  title="Increase font size"
+  aria-label="Increase font size"
+  disabled={active.fontSize === NOTES_FONT_SIZES[NOTES_FONT_SIZES.length - 1]}
+  onMouseDown={event => {
+    event.preventDefault();
+    captureSelection();
+  }}
+  onClick={() => changeFontSize(1)}
+>
+  ↑
+</button>
       <span className="notes-toolbar-divider" />
       {[['bold', 'B', 'Bold (Ctrl+B)'], ['italic', 'I', 'Italic (Ctrl+I)'], ['underline', 'U', 'Underline (Ctrl+U)']].map(([command, text, title]) =>
         <button key={command} className={`notes-format-${command}`} type="button" title={title} aria-label={command[0].toUpperCase() + command.slice(1)} aria-pressed={active[command]}

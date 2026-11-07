@@ -30,3 +30,27 @@
   .notes-size-label select { height: 34px; font-size: 14px; }
   .notes-editable { padding: 20px 18px; }
 }
+
+.notes-size-arrow {
+  width: 30px;
+  height: 30px;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  font-size: 18px;
+  border-radius: 4px;
+}
+
+.notes-size-arrow:hover:not(:disabled) {
+  background: #e5e5e5;
+}
+
+.notes-size-arrow:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.notes-size-label {
+  min-width: 45px;
+  text-align: center;
+}
