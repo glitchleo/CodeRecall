@@ -200,3 +200,19 @@
   .result-card-meta { padding-top: 6px; padding-bottom: 6px; }
   .result-card-footer { flex-basis: 38px; }
 }
+/* Longer search box in Find (the path box shrinks in styles.css) */
+@media (min-width: 851px) {
+  .find-search-box { flex: 1 1 340px; width: auto; min-width: 180px; }
+}
+
+/* Copy sections in the read-only code view: tag rows are blank, only the border lines show */
+.snippet-lines { flex: 1 0 auto; min-width: max-content; }
+.snippet-line { min-height: 1.85em; }
+.snippet-section { position: relative; background: rgb(107 186 250 / 6%); box-shadow: inset 0 1px 0 #4d7ea8, inset 0 -1px 0 #4d7ea8, inset 2px 0 0 #4d7ea8; }
+.snippet-copy-anchor { position: sticky; top: 4px; right: 12px; z-index: 2; display: block; width: 0; height: 0; margin-left: auto; }
+.snippet-copy-section { position: absolute; top: 0; right: 0; display: flex; align-items: center; justify-content: center; width: 22px; height: 16px; padding: 0; border: 1px solid #4d7ea8; border-radius: 3px; color: #a8d8ff; background: #243746; font: 600 11px/1 Consolas, 'SFMono-Regular', Menlo, monospace; cursor: pointer; }
+.snippet-copy-section:hover:not(:disabled) { color: #fff; background: #3d6c91; }
+.snippet-copy-section:focus-visible { outline: 2px solid #6bbafa; outline-offset: 1px; }
+.snippet-copy-section:disabled { opacity: .4; cursor: default; }
+.snippet-copy-section.copied { color: #b1d5b8; border-color: #4d7a59; background: #26342a; }
+.viewer-back span { max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

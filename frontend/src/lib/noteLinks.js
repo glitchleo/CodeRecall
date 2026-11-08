@@ -21,14 +21,13 @@ export function pathOfNode(nodes, id) {
 }
 
 /**
- * input: a path string or { path, id }. The id wins while the file exists (it survives
+ * input: a path string or { path, id }. The id wins while the item exists (it survives
  * renames and moves); the path is the fallback after JSON import, which creates new ids.
- * Returns { id, name, path } for a FILE, otherwise null.
+ * Returns { id, name, path, type } for a FILE or a FOLDER, otherwise null.
  */
 export function resolveNoteLink(nodes, input) {
   const link = typeof input === "string" ? { path: input } : input || {};
-  const byId = link.id ? nodes.find((node) => node.id === link.id) : null;
-  let found = byId?.type === "file" ? byId : null;
+  let found = link.id ? nodes.find((node) => node.id === link.id) ?? null : null;
   if (!found && link.path) {
     const parts = splitLibraryPath(link.path);
     if (parts.length) {
@@ -38,8 +37,8 @@ export function resolveNoteLink(nodes, input) {
         current = children.get(`${current?.id ?? ""}\u0000${key(part)}`);
         if (!current) break;
       }
-      if (current?.type === "file") found = current;
+      found = current ?? null;
     }
   }
-  return found ? { id: found.id, name: found.name, path: pathOfNode(nodes, found.id) } : null;
+  return found ? { id: found.id, name: found.name, type: found.type, path: pathOfNode(nodes, found.id) } : null;
 }

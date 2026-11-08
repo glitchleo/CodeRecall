@@ -3,6 +3,8 @@ import ItemIcon from './ItemIcon.jsx';
 import TagPicker, { TagBadges } from './TagPicker.jsx';
 import MetadataPanel from './MetadataPanel.jsx';
 import { CodeTokens } from './SyntaxCode.jsx';
+import SectionedCode from './SectionedCode.jsx';
+import { parseCopySections, stripCopySectionTags } from './lib/editor.js';
 import { getAncestors } from './lib/library.js';
 import { buildSearchIndex } from './lib/search.js';
 import { getFileTags } from './lib/tags.js';
@@ -35,7 +37,9 @@ export function SearchIcon({ name, size = 18 }) {
 
 // Small, bounded previews keep large snippets from making result cards expensive.
 export function CodeLines({ content = '', filename = '', preview = false }) {
-  const text = preview ? content.slice(0, 6000).split('\n').slice(0, 12).join('\n') : content;
+  // Full view: copy sections get border lines and a "c" button. Cards: the tag lines are simply left out.
+  if (!preview && parseCopySections(content).sections.length) return <SectionedCode content={content} filename={filename} />;
+  const text = preview ? stripCopySectionTags(content).slice(0, 6000).split('\n').slice(0, 12).join('\n') : content;
   const code = <pre className={`snippet-code${preview ? ' snippet-code-preview' : ''}`}><code>{text ? <CodeTokens code={text} filename={filename} /> : <span className="code-empty">No code yet</span>}</code></pre>;
   return preview ? code : <div className="snippet-document"><pre className="snippet-read-gutter" aria-hidden="true">{text.split('\n').map((_, index) => index + 1).join('\n')}</pre>{code}</div>;
 }
@@ -56,13 +60,14 @@ function ResultCard({ item, tags, previews, childCount, path, onOpen, onEdit, on
   </article>;
 }
 
-export default function SearchMode({ nodes, tags, query, onQuery, searchRef, tagFilter, onToggleFilter, onCreateTag, onClearFilters, folderId, breadcrumb, onNavigate, onBack, canBack, onEdit, onCreate, onCopy, onSaveMetadata, onToggleTag, storageError }) {
+export default function SearchMode({ nodes, tags, query, onQuery, searchRef, tagFilter, onToggleFilter, onCreateTag, onClearFilters, folderId, breadcrumb, onNavigate, onBack, canBack, onEdit, onCreate, onCopy, onSaveMetadata, onToggleTag, storageError, resolveLink }) {
   const [openedId, setOpenedId] = useState(null);
+  const [viewerTrail, setViewerTrail] = useState([]);
   const [detailsOnly, setDetailsOnly] = useState(false);
   const [kind, setKind] = useState('all');
   const [browseChildren, setBrowseChildren] = useState(false);
   const [newMenu, setNewMenu] = useState(false);
-  const closeViewer = useCallback(() => setOpenedId(null), []);
+  const closeViewer = useCallback(() => { setOpenedId(null); setViewerTrail([]); }, []);
   const resultsRef = useRef(null);
   const folder = nodes.find(node => node.id === folderId);
   const searchIndex = useMemo(() => buildSearchIndex(nodes, tags, { query, tagIds: tagFilter }), [nodes, tags, query, tagFilter]);
@@ -73,6 +78,7 @@ export default function SearchMode({ nodes, tags, query, onQuery, searchRef, tag
     return new Map(nodes.map(node => { const parts = []; let parent = byId.get(node.parentId); while (parent) { parts.unshift(parent.name); parent = byId.get(parent.parentId); } return [node.id, parts.join(' / ')]; }));
   }, [nodes]);
   const opened = nodes.find(node => node.id === openedId);
+  const trailPrevious = nodes.find(node => node.id === viewerTrail.at(-1));
   const searching = Boolean(query.trim() || tagFilter.length);
   useEffect(() => { resultsRef.current?.scrollTo(0, 0); }, [query, folderId, kind, tagFilter]);
   useEffect(() => {
@@ -81,8 +87,23 @@ export default function SearchMode({ nodes, tags, query, onQuery, searchRef, tag
     return () => window.removeEventListener('keydown', handler, true);
   }, [newMenu]);
   function navigate(id) { setBrowseChildren(id !== null); onNavigate(id); setNewMenu(false); }
-  function open(item) { if (item.type === 'folder') navigate(item.id); else { setDetailsOnly(false); setOpenedId(item.id); } }
-  function details(item) { setDetailsOnly(item.type === 'folder'); setOpenedId(item.id); }
+  function open(item) { if (item.type === 'folder') navigate(item.id); else { setViewerTrail([]); setDetailsOnly(false); setOpenedId(item.id); } }
+  function details(item) { setViewerTrail([]); setDetailsOnly(item.type === 'folder'); setOpenedId(item.id); }
+  // A note reference: a folder opens in the browser, a file opens in this viewer with a way back.
+  function followLink(target) {
+    if (!target) return;
+    if (target.type === 'folder') { setOpenedId(null); setViewerTrail([]); navigate(target.id); return; }
+    if (target.id === openedId) return;
+    setViewerTrail(trail => [...trail, openedId]);
+    setDetailsOnly(false);
+    setOpenedId(target.id);
+  }
+  function viewerBack() {
+    if (!trailPrevious) return;
+    setViewerTrail(trail => trail.slice(0, -1));
+    setDetailsOnly(false);
+    setOpenedId(trailPrevious.id);
+  }
   return <section className="find-workspace" aria-label="Find code">
     <div className="command-bar find-command-bar" role="toolbar" aria-label="Search actions">
       <div className="find-new-wrap"><button className="toolbar-button" aria-expanded={newMenu} onClick={() => setNewMenu(value => !value)}><SearchIcon name="plus" size={16} /><span>New</span><SearchIcon name="down" size={12} /></button>{newMenu && <><button className="find-menu-dismiss" aria-label="Close new menu" onClick={() => setNewMenu(false)} /><div className="find-new-menu" role="menu" aria-label="Create a folder or file">
@@ -104,11 +125,11 @@ export default function SearchMode({ nodes, tags, query, onQuery, searchRef, tag
       {!results.length && <div className="find-empty"><p>{searching ? 'No items match your search.' : 'This folder is empty.'}</p>{searching ? <button className="button secondary" onClick={() => { onQuery(''); onClearFilters(); setKind('all'); }}>Clear search and filters</button> : <button className="button secondary" onClick={() => onCreate('python')}>New Python file</button>}</div>}
     </div>
     <footer className="status-bar find-status" role="status"><span>{results.length} {results.length === 1 ? 'item' : 'items'}</span><span className={`status-message${storageError ? ' storage-warning' : ''}`}>{storageError ? 'Browser storage unavailable' : 'Saved locally'}</span></footer>
-    {opened && <ItemViewer key={opened.id} item={opened} nodes={nodes} tags={tags} detailsOnly={detailsOnly} onClose={closeViewer} onEdit={() => { setOpenedId(null); onEdit(opened); }} onCopy={() => onCopy(opened)} onSaveMetadata={onSaveMetadata} onToggleTag={onToggleTag} onCreateTag={onCreateTag} />}
+    {opened && <ItemViewer key={opened.id} item={opened} nodes={nodes} tags={tags} detailsOnly={detailsOnly} resolveLink={resolveLink} onOpenLink={followLink} backName={trailPrevious?.name} onBack={viewerBack} onClose={closeViewer} onEdit={() => { closeViewer(); onEdit(opened); }} onCopy={() => onCopy(opened)} onSaveMetadata={onSaveMetadata} onToggleTag={onToggleTag} onCreateTag={onCreateTag} />}
   </section>;
 }
 
-function ItemViewer({ item, nodes, tags, detailsOnly, onClose, onEdit, onCopy, onSaveMetadata, onToggleTag, onCreateTag }) {
+function ItemViewer({ item, nodes, tags, detailsOnly, resolveLink, onOpenLink, backName, onBack, onClose, onEdit, onCopy, onSaveMetadata, onToggleTag, onCreateTag }) {
   const dialogRef = useRef(null);
   const closeRef = useRef(null);
   const metadataRef = useRef(null);
@@ -125,6 +146,14 @@ function ItemViewer({ item, nodes, tags, detailsOnly, onClose, onEdit, onCopy, o
     if (metadataRef.current && !metadataRef.current.requestSave()?.ok) return;
     onClose();
   }, [onClose]);
+  const requestLink = target => {
+    if (metadataRef.current && !metadataRef.current.requestSave()?.ok) return;
+    onOpenLink(target);
+  };
+  const requestBack = () => {
+    if (metadataRef.current && !metadataRef.current.requestSave()?.ok) return;
+    onBack();
+  };
   const requestEdit = () => {
     if (metadataRef.current && !metadataRef.current.requestSave()?.ok) return;
     onEdit();
@@ -147,7 +176,7 @@ function ItemViewer({ item, nodes, tags, detailsOnly, onClose, onEdit, onCopy, o
     return () => { dialog.removeEventListener('keydown', handleKey); previous?.isConnected && previous.focus(); };
   }, [requestClose]);
   return <div className="viewer-overlay" data-item-viewer="" onMouseDown={event => { if (event.target === event.currentTarget) requestClose(); }}><section ref={dialogRef} className={`item-viewer${detailsOnly ? ' metadata-viewer' : ''}`} role="dialog" aria-modal="true" aria-labelledby="viewer-title">
-    <header className="viewer-heading"><ItemIcon item={item} size={24} /><div><h2 id="viewer-title">{item.name}</h2><p>{['Library', ...getAncestors(nodes, item.id).map(node => node.name)].join(' / ')}</p></div><div className="viewer-actions">{item.type === 'file' && <><button className="button secondary" aria-label="Copy code" onClick={onCopy}><SearchIcon name="copy" size={15} /><span>Copy code</span></button><button className="button primary" aria-label={`Edit ${item.name}`} onClick={requestEdit}><SearchIcon name="edit" size={15} /><span>Edit</span></button></>}<button ref={closeRef} className="icon-button" aria-label="Close preview" onClick={requestClose}><SearchIcon name="close" /></button></div></header>
+    <header className="viewer-heading"><ItemIcon item={item} size={24} /><div><h2 id="viewer-title">{item.name}</h2><p>{['Library', ...getAncestors(nodes, item.id).map(node => node.name)].join(' / ')}</p></div><div className="viewer-actions">{backName && <button className="button secondary viewer-back" aria-label={`Back to ${backName}`} title={`Back to ${backName}`} onClick={requestBack}><SearchIcon name="back" size={15} /><span>Back to {backName}</span></button>}{item.type === 'file' && <><button className="button secondary" aria-label="Copy code" onClick={onCopy}><SearchIcon name="copy" size={15} /><span>Copy code</span></button><button className="button primary" aria-label={`Edit ${item.name}`} onClick={requestEdit}><SearchIcon name="edit" size={15} /><span>Edit</span></button></>}<button ref={closeRef} className="icon-button" aria-label="Close preview" onClick={requestClose}><SearchIcon name="close" /></button></div></header>
     {!detailsOnly && <div className="viewer-workspace-bar">
       <div className="viewer-mobile-switch" aria-label="Preview workspace"><button aria-pressed={mobilePane === 'code'} onClick={() => setMobilePane('code')}>Code</button><button aria-pressed={mobilePane === 'notes'} onClick={() => setMobilePane('notes')}>Notes</button></div>
       <span className="viewer-code-caption">Source preview</span>
@@ -155,6 +184,6 @@ function ItemViewer({ item, nodes, tags, detailsOnly, onClose, onEdit, onCopy, o
     </div>}
     <div ref={bodyRef} className={`viewer-body viewer-notes-${notesMode} viewer-mobile-${mobilePane}`} style={{ '--viewer-notes-width': `${notesWidth}%` }}>{!detailsOnly && <div className="viewer-code" tabIndex={0} aria-label="Full code, scroll to read"><CodeLines content={item.content} filename={item.name} /></div>}
       {!detailsOnly && <div className="viewer-resizer" role="separator" aria-label="Resize notes panel" aria-orientation="vertical" aria-valuemin={20} aria-valuemax={75} aria-valuenow={Math.round(notesWidth)} tabIndex={0} onKeyDown={event => { if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') { event.preventDefault(); changeWidth(notesWidth + (event.key === 'ArrowLeft' ? 2 : -2)); } }} onPointerDown={event => { event.preventDefault(); event.currentTarget.setPointerCapture(event.pointerId); resizeNotes(event.clientX); }} onPointerMove={event => { if (event.currentTarget.hasPointerCapture(event.pointerId)) resizeNotes(event.clientX); }} onPointerUp={event => { if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId); }} />}
-      <aside className="viewer-details" aria-label="Description and tags"><div className="viewer-type">{getItemType(item)}</div><MetadataPanel ref={metadataRef} item={item} tags={tags} onSave={onSaveMetadata} onToggleTag={onToggleTag} onCreateTag={onCreateTag} /><dl className="viewer-dates"><dt>Last updated</dt><dd>{formatDateTime(item.updatedAt)}</dd><dt>Created</dt><dd>{formatDateTime(item.createdAt)}</dd></dl></aside></div>
+      <aside className="viewer-details" aria-label="Description and tags"><div className="viewer-type">{getItemType(item)}</div><MetadataPanel ref={metadataRef} item={item} tags={tags} resolveLink={resolveLink} onOpenLink={requestLink} onSave={onSaveMetadata} onToggleTag={onToggleTag} onCreateTag={onCreateTag} /><dl className="viewer-dates"><dt>Last updated</dt><dd>{formatDateTime(item.updatedAt)}</dd><dt>Created</dt><dd>{formatDateTime(item.createdAt)}</dd></dl></aside></div>
   </section></div>;
 }

@@ -183,23 +183,18 @@
   .editor-input { color: CanvasText; -webkit-text-fill-color: CanvasText; }
 }
 
-/* Copy sections: <copy-sec> ... </copy-sec> */
-.editor-copy-rail { position: relative; flex: 0 0 26px; overflow: hidden; border-right: 1px solid #272727; background: #1e1e1e; }
-.editor-copy-rail-inner { position: absolute; top: 0; left: 0; right: 0; }
-.editor-copy-rail-section { position: absolute; left: 0; right: 0; box-sizing: border-box; border-top: 1px solid #4d7ea8; border-bottom: 1px solid #4d7ea8; background: rgb(107 186 250 / 5%); }
-.editor-copy-section { position: absolute; top: 0; left: 3px; width: 20px; display: flex; align-items: center; justify-content: center; padding: 0; border: 0; border-radius: 3px; color: #a8d8ff; background: rgb(107 186 250 / 14%); font: 600 12px/1 Consolas, 'SFMono-Regular', Menlo, monospace; cursor: pointer; }
+/* Copy sections: <copy-sec> ... </copy-sec> (tag rows are painted over; only the two border lines show) */
+.editor-section-layer { position: absolute; inset: 0; z-index: 2; overflow: hidden; pointer-events: none; }
+.editor-section-layer-inner { position: relative; min-height: 100%; }
+.editor-section-cover { position: absolute; left: 0; right: 0; background: #1e1e1e; }
+.editor-section-box { position: absolute; left: 0; right: 0; display: flex; justify-content: flex-end; align-items: flex-start; box-sizing: border-box; padding: 3px 18px 0 0; background: rgb(107 186 250 / 5%); box-shadow: inset 0 1px 0 #4d7ea8, inset 0 -1px 0 #4d7ea8, inset 2px 0 0 #4d7ea8; }
+.editor-copy-section { position: sticky; top: 3px; display: flex; align-items: center; justify-content: center; width: 22px; height: 16px; padding: 0; border: 1px solid #4d7ea8; border-radius: 3px; color: #a8d8ff; background: #243746; font: 600 11px/1 Consolas, 'SFMono-Regular', Menlo, monospace; cursor: pointer; pointer-events: auto; }
 .editor-copy-section:hover:not(:disabled) { color: #fff; background: #3d6c91; }
-.editor-copy-section:focus-visible { outline: 2px solid #6bbafa; outline-offset: -2px; }
-.editor-copy-section:disabled { opacity: .35; cursor: default; }
-.editor-copy-section.copied { color: #b1d5b8; background: #26342a; }
-.editor-section-layer { position: absolute; inset: 0; overflow: hidden; pointer-events: none; }
-.editor-section-layer-inner { position: absolute; top: 0; left: 0; right: 0; }
-.editor-section-box { position: absolute; left: 0; right: 0; box-sizing: border-box; border-top: 1px solid #4d7ea8; border-bottom: 1px solid #4d7ea8; border-left: 2px solid #4d7ea8; background: rgb(107 186 250 / 5%); }
-.editor-section-head, .editor-section-foot { position: absolute; left: 0; right: 0; background: rgb(107 186 250 / 10%); }
-.editor-section-head { top: 0; }
-.editor-section-foot { bottom: 0; }
+.editor-copy-section:focus-visible { outline: 2px solid #6bbafa; outline-offset: 1px; }
+.editor-copy-section:disabled { opacity: .4; cursor: default; }
+.editor-copy-section.copied { color: #b1d5b8; border-color: #4d7a59; background: #26342a; }
 .editor-section-warning { color: #d9c3a1; }
 .editor-copy-path { flex: 0 0 auto; margin-left: 4px; padding: 1px 7px; border-radius: 3px; color: #91c6ed; font-size: 10px; }
 .editor-copy-path:hover { color: #b3ddfb; background: #2b2b2b; }
 .editor-copy-path:focus-visible { outline: 1px solid #6bbafa; }
-@media (forced-colors: active) { .editor-section-box, .editor-copy-rail-section { border-color: CanvasText; } }
+@media (forced-colors: active) { .editor-section-box { box-shadow: none; border: 1px solid CanvasText; } }

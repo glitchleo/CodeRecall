@@ -1,5 +1,6 @@
 import React, { forwardRef, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { createEditorState, recordEdit, undoEdit, redoEdit, selectEditorRange, indentSelection, insertLineBreak, normalizeLineEndings, parseCopySections, completeCopySection } from './lib/editor.js';
+import { createEditorState, recordEdit, undoEdit, redoEdit, selectEditorRange, indentSelection, insertLineBreak, normalizeLineEndings, parseCopySections, completeCopySection, insertCopySection } from './lib/editor.js';
+import { copyText } from './lib/clipboard.js';
 import TagPicker, { TagBadges } from './TagPicker.jsx';
 import ItemIcon from './ItemIcon.jsx';
 import FileNotes from './FileNotes.jsx';
@@ -14,6 +15,7 @@ function EditorIcon({ name, size = 17 }) {
     save: <><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h12l4 4v12a2 2 0 0 1-2 2Z" /><path d="M7 3v6h10V3M7 21v-8h10v8" /></>,
     undo: <><path d="m8 4-5 5 5 5M3 9h11a6 6 0 0 1 0 12" /></>,
     redo: <><path d="m16 4 5 5-5 5M21 9H10a6 6 0 0 0 0 12" /></>,
+    section: <><path d="M3 5h18M3 19h18M8 12h8" /></>,
     wrap: <><path d="M3 6h18M3 12h14a3 3 0 0 1 0 6h-4m3-3-3 3 3 3M3 18h5" /></>,
     file: <><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z" /><path d="M14 2v6h6M8 13h8M8 17h5" /></>,
     notes: <><rect x="3" y="3" width="18" height="18" rx="2" /><path d="M14 3v18M17 8h1M17 12h1M17 16h1" /></>,
@@ -22,22 +24,6 @@ function EditorIcon({ name, size = 17 }) {
     close: <path d="m6 6 12 12M6 18 18 6" />,
   };
   return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{paths[name]}</svg>;
-}
-
-async function copyText(value) {
-  try {
-    if (navigator.clipboard?.writeText) { await navigator.clipboard.writeText(value); return true; }
-  } catch { /* fall through to the legacy path */ }
-  const area = document.createElement('textarea');
-  area.value = value;
-  area.setAttribute('readonly', '');
-  area.style.cssText = 'position:fixed;top:0;opacity:0';
-  document.body.appendChild(area);
-  area.select();
-  let ok = false;
-  try { ok = document.execCommand('copy'); } catch { ok = false; }
-  area.remove();
-  return ok;
 }
 
 function byteLabel(text) {
@@ -70,7 +56,6 @@ const CodeEditor = forwardRef(function CodeEditor({ file, path, onSave, onClose,
   const workspaceRef = useRef(null);
   const gutterRef = useRef(null);
   const mirrorRef = useRef(null);
-  const railRef = useRef(null);
   const layerRef = useRef(null);
   const copiedTimerRef = useRef(0);
   const [copiedSection, setCopiedSection] = useState(null);
@@ -93,6 +78,7 @@ const CodeEditor = forwardRef(function CodeEditor({ file, path, onSave, onClose,
   dirtyRef.current = dirty;
   const lines = useMemo(() => normalizeLineEndings(text).split('\n'), [text]);
   const cursorLines = normalizeLineEndings(text.slice(0, history.present.end)).split('\n');
+  const cursorRow = cursorLines.length - 1;
   const language = getFileLanguage(file.name);
   const { sections, orphans } = useMemo(() => parseCopySections(text), [text]);
   const lineTops = useMemo(() => {
@@ -287,9 +273,24 @@ const CodeEditor = forwardRef(function CodeEditor({ file, path, onSave, onClose,
     }
   };
 
+  // Wraps the selected lines in a copy section, or adds an empty one (Alt+Shift+C).
+  const addCopySection = () => {
+    const input = inputRef.current;
+    if (!input) return;
+    syncSelection(input);
+    const current = historyRef.current.present;
+    edit(insertCopySection(current.text, current.start, current.end));
+    focusInput();
+  };
+
   const handleKeyDown = (event) => {
     if (event.nativeEvent.isComposing || event.keyCode === 229) return;
     const modifier = event.ctrlKey || event.metaKey;
+    if (event.altKey && event.shiftKey && !modifier && event.code === 'KeyC') {
+      event.preventDefault();
+      addCopySection();
+      return;
+    }
     const key = event.key.toLowerCase();
     if (modifier && !event.altKey && (key === 'z' || key === 'y')) {
       event.preventDefault();
@@ -345,9 +346,7 @@ const CodeEditor = forwardRef(function CodeEditor({ file, path, onSave, onClose,
     // Translate instead of scrolling the gutter: its viewport has no horizontal
     // scrollbar, so its native maximum scroll offset can be shorter than the input.
     if (gutterRef.current?.firstElementChild) gutterRef.current.firstElementChild.style.transform = `translateY(${-input.scrollTop}px)`;
-    for (const holder of [railRef.current, layerRef.current]) {
-      if (holder?.firstElementChild) holder.firstElementChild.style.transform = `translateY(${-input.scrollTop}px)`;
-    }
+    if (layerRef.current) layerRef.current.scrollTop = input.scrollTop;
     if (highlightRef.current) {
       highlightRef.current.scrollTop = input.scrollTop;
       highlightRef.current.scrollLeft = input.scrollLeft;
@@ -367,6 +366,7 @@ const CodeEditor = forwardRef(function CodeEditor({ file, path, onSave, onClose,
       <div className="editor-code-actions">
       <button className="editor-toolbar-button editor-icon-button" aria-label="Undo" title="Undo (Ctrl+Z)" disabled={!history.past.length} onMouseDown={(event) => event.preventDefault()} onClick={() => applyHistory(undoEdit(historyRef.current))}><EditorIcon name="undo" /></button>
       <button className="editor-toolbar-button editor-icon-button" aria-label="Redo" title="Redo (Ctrl+Shift+Z)" disabled={!history.future.length} onMouseDown={(event) => event.preventDefault()} onClick={() => applyHistory(redoEdit(historyRef.current))}><EditorIcon name="redo" /></button>
+      <button className="editor-toolbar-button editor-icon-button" aria-label="Add copy section" title="Add copy section (Alt+Shift+C). Wraps the selected lines." onMouseDown={(event) => event.preventDefault()} onClick={addCopySection}><EditorIcon name="section" /></button>
       <span className="editor-separator" />
       <TagPicker label="Tags" tags={tags} selectedIds={file.tagIds || []} onToggle={onToggleTag} onCreate={onCreateTag} disabled={showUnsaved} />
       <span className="editor-separator" />
@@ -384,21 +384,7 @@ const CodeEditor = forwardRef(function CodeEditor({ file, path, onSave, onClose,
       <div className="editor-gutter" ref={gutterRef} aria-hidden="true" style={{ width: `${Math.max(3, String(lines.length).length) + 2}ch` }}>
         <div className="editor-line-numbers">{lines.map((_, index) => <div key={index} className={index === cursorLines.length - 1 ? 'current-line-number' : undefined} style={wrap ? { height: lineHeights[index] || 22 } : undefined}>{index + 1}</div>)}</div>
       </div>
-      {sections.length > 0 && <div className="editor-copy-rail" ref={railRef}>
-        <div className="editor-copy-rail-inner">{sections.map((section) => <div key={section.start} className="editor-copy-rail-section" style={{ top: 16 + lineTops[section.start], height: lineTops[section.end + 1] - lineTops[section.start] }}>
-          <button type="button" className={`editor-copy-section${copiedSection === section.start ? ' copied' : ''}`} disabled={!section.code}
-            style={{ height: lineTops[section.start + 1] - lineTops[section.start] }}
-            aria-label={section.code ? `Copy section, lines ${section.start + 2} to ${section.end}` : 'Copy section (empty)'} title={section.code ? 'Copy this section (without the tags)' : 'This section is empty'}
-            onMouseDown={(event) => event.preventDefault()} onClick={() => copySection(section)}>{copiedSection === section.start ? '✓' : 'c'}</button>
-        </div>)}</div>
-      </div>}
       <div className="editor-text-area">
-        {sections.length > 0 && <div className="editor-section-layer" ref={layerRef} aria-hidden="true">
-          <div className="editor-section-layer-inner">{sections.map((section) => <div key={section.start} className="editor-section-box" style={{ top: 16 + lineTops[section.start], height: lineTops[section.end + 1] - lineTops[section.start] }}>
-            <span className="editor-section-head" style={{ height: lineTops[section.start + 1] - lineTops[section.start] }} />
-            <span className="editor-section-foot" style={{ height: lineTops[section.end + 1] - lineTops[section.end] }} />
-          </div>)}</div>
-        </div>}
         <pre ref={highlightRef} className={`editor-highlight${wrap ? ' editor-highlight-wrapped' : ''}`} aria-hidden="true" style={wrapWidth ? { width: wrapWidth + 32 } : undefined}><code><CodeTokens code={text + '\n'} filename={file.name} /></code></pre>
         <textarea
           ref={inputRef}
@@ -417,6 +403,17 @@ const CodeEditor = forwardRef(function CodeEditor({ file, path, onSave, onClose,
           onScroll={(event) => syncScroll(event.currentTarget)}
         />
         {wrap && <div className="editor-wrap-measure" ref={mirrorRef} aria-hidden="true" style={{ width: wrapWidth }}>{lines.map((line, index) => <div key={index}>{line || '\u200b'}</div>)}</div>}
+        {sections.length > 0 && <div className="editor-section-layer" ref={layerRef}>
+          <div className="editor-section-layer-inner" style={{ height: lineTops[lineTops.length - 1] + 32 }}>
+            {/* The tag lines stay in the file but are painted over. A tag shows again while the caret is on it, so it can be edited. */}
+            {sections.flatMap((section) => [section.start, section.end].filter((row) => row !== cursorRow).map((row) => <div key={`cover-${row}`} className="editor-section-cover" aria-hidden="true" style={{ top: 16 + lineTops[row], height: lineTops[row + 1] - lineTops[row] }} />))}
+            {sections.map((section) => <div key={section.start} className="editor-section-box" style={{ top: 16 + lineTops[section.start], height: lineTops[section.end + 1] - lineTops[section.start] }}>
+              <button type="button" className={`editor-copy-section${copiedSection === section.start ? ' copied' : ''}`} disabled={!section.code}
+                aria-label={section.code ? `Copy section, lines ${section.start + 2} to ${section.end}` : 'Copy section (empty)'} title={section.code ? 'Copy this section' : 'This section is empty'}
+                onMouseDown={(event) => event.preventDefault()} onClick={() => copySection(section)}>{copiedSection === section.start ? '✓' : 'c'}</button>
+            </div>)}
+          </div>
+        </div>}
       </div>
     </div>
     </div>

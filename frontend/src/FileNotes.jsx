@@ -199,8 +199,8 @@ export default function FileNotes({ value, onChange, readOnly = false, resolveLi
 
   const insertLink = () => {
     const target = resolveLink?.(linkPath.trim());
-    if (!resolveLink) { setLinkError('Linking to files is not available here.'); return; }
-    if (!target) { setLinkError('No file found at that path. Copy it from the editor path bar (files only).'); return; }
+    if (!resolveLink) { setLinkError('Linking is not available here.'); return; }
+    if (!target) { setLinkError('Nothing found at that path. Copy it from the editor`s path bar. Files and folders both work.'); return; }
     if (target.path.length > MAX_LINK_LENGTH) { setLinkError('That path is too long to link.'); return; }
     restoreSelection();
     const selected = window.getSelection()?.toString().replace(/\s+/g, ' ').trim().slice(0, 120);
@@ -213,7 +213,7 @@ export default function FileNotes({ value, onChange, readOnly = false, resolveLi
 
   const openLinkedFile = chip => {
     const target = resolveLink?.({ path: chip.dataset.link, id: chip.dataset.linkId });
-    if (!target) { setLimitMessage('That linked file no longer exists.'); return; }
+    if (!target) { setLimitMessage('That linked file or folder no longer exists.'); return; }
     setLimitMessage('');
     onOpenLink?.(target);
   };
@@ -243,7 +243,7 @@ export default function FileNotes({ value, onChange, readOnly = false, resolveLi
         <button key={command} className={`notes-format-${command}`} type="button" title={title} aria-label={command[0].toUpperCase() + command.slice(1)} aria-pressed={active[command]}
           onMouseDown={event => { event.preventDefault(); captureSelection(); }} onClick={() => format(command)}>{text}</button>)}
       <span className="notes-toolbar-divider" />
-      <button className="notes-link-button" type="button" title="Link to another file (Ctrl+K)" aria-label="Link to another file" aria-expanded={linkOpen}
+      <button className="notes-link-button" type="button" title="Link to a file or folder (Ctrl+K)" aria-label="Link to a file or folder" aria-expanded={linkOpen}
         onMouseDown={event => { event.preventDefault(); captureSelection(); }} onClick={openLinkBar}>
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M10 13a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1 1M14 11a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l1-1" /></svg>
       </button>
@@ -252,7 +252,7 @@ export default function FileNotes({ value, onChange, readOnly = false, resolveLi
       if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); closeLinkBar(); }
       else if (event.key === 'Enter') { event.preventDefault(); insertLink(); }
     }}>
-      <input ref={linkInputRef} type="text" value={linkPath} aria-label="Path of the file to link" placeholder="Paste a file path, e.g. D:/Utils/math.js" spellCheck={false}
+      <input ref={linkInputRef} type="text" value={linkPath} aria-label="Path of the file or folder to link" placeholder="Paste a file or folder path, e.g. D:/Utils/math.js" spellCheck={false}
         onChange={event => { setLinkPath(event.target.value); setLinkError(''); }} />
       <button type="button" className="notes-link-add" onClick={insertLink} disabled={!linkPath.trim()}>Add link</button>
       <button type="button" className="notes-link-cancel" onClick={closeLinkBar}>Cancel</button>

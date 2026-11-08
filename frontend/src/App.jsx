@@ -103,6 +103,9 @@ export default function App() {
   const [dropTarget, setDropTarget] = useState(undefined);
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
+    try { return localStorage.getItem('coderecall.sidebar.collapsed') === '1'; } catch { return false; }
+  });
   const [editorFileId, setEditorFileId] = useState(null);
   // Files we came from by following a note reference; Back pops one instead of leaving the editor.
   const [editorTrail, setEditorTrail] = useState([]);
@@ -321,16 +324,29 @@ export default function App() {
 
   const resolveLink = input => resolveNoteLink(nodes, input);
 
+  // The CodeRecall title always stays put; pressing it hides or shows everything under it.
+  function toggleSidebar() {
+    if (window.matchMedia('(max-width: 850px)').matches) { setSidebarOpen(false); return; }
+    setSidebarCollapsed(value => {
+      try { localStorage.setItem('coderecall.sidebar.collapsed', value ? '0' : '1'); } catch { /* the preference just won't persist */ }
+      return !value;
+    });
+  }
+
   // The editor has already offered Save / Discard / Cancel before calling this.
   function followNoteLink(target, fromId) {
-    if (!target || target.id === fromId || !nodes.some(node => node.id === target.id && node.type === 'file')) return;
+    const item = target && nodes.find(node => node.id === target.id);
+    if (!item || item.id === fromId) return;
+    if (item.type === 'folder') { setEditorFileId(null); setEditorTrail([]); performNavigate(item.id); return; }
     setEditorTrail(trail => [...trail, fromId]);
     setSelected([target.id]); setEditorFileId(target.id); setToast(null); setMenu(null);
   }
 
   function openLinkedFromDetails(target) {
-    const item = nodes.find(node => node.id === target?.id && node.type === 'file');
-    if (item) openItem(item);
+    const item = nodes.find(node => node.id === target?.id);
+    if (!item) return;
+    if (item.type === 'folder') navigate(item.id);
+    else openItem(item);
   }
 
   function closeEditor() {
@@ -553,10 +569,10 @@ export default function App() {
   }
   if (dialog?.type === 'transfer') collectDestinations();
 
-  return <div className={`app-shell view-${preferences.density} mode-${preferences.mode}${sidebarOpen ? ' sidebar-visible' : ''}`}>
+  return <div className={`app-shell view-${preferences.density} mode-${preferences.mode}${sidebarOpen ? ' sidebar-visible' : ''}${sidebarCollapsed ? ' sidebar-collapsed' : ''}`}>
     {sidebarOpen && <button className="sidebar-scrim" aria-label="Close navigation" onClick={() => setSidebarOpen(false)} />}
     <aside className="sidebar" aria-label="Explorer navigation">
-      <div className="sidebar-brand"><span className="brand-symbol">{'</>'}</span><span>CodeRecall</span><button className="icon-button sidebar-close" aria-label="Close navigation" onClick={() => setSidebarOpen(false)}><Icon name="close" /></button></div>
+      <div className="sidebar-brand"><button type="button" className="brand-toggle" aria-expanded={!sidebarCollapsed} title={sidebarCollapsed ? 'Show navigation' : 'Hide navigation'} onClick={toggleSidebar}><span className="brand-symbol">{'</>'}</span><span>CodeRecall</span></button><button className="icon-button sidebar-close" aria-label="Close navigation" onClick={() => setSidebarOpen(false)}><Icon name="close" /></button></div>
       <nav className="roots-section" aria-label="Roots">{ROOTS.map(root => <button key={root.id}
         className={`sidebar-link ${folderId === root.parentId && !searching ? 'active' : ''} ${dropTarget === root.parentId ? 'drop-target' : ''}`}
         onClick={() => navigate(root.parentId)} onDragOver={event => dragOver(event, root.parentId)} onDragLeave={() => setDropTarget(undefined)} onDrop={event => drop(event, root.parentId)}
@@ -578,7 +594,7 @@ export default function App() {
     <main className="workspace" aria-label="File explorer">
       {editorFile ? <CodeEditor key={editorFile.id} ref={editorRef} file={editorFile} path={editorPath} persistenceError={storageError} onSave={saveEditorContent} onClose={closeEditor} resolveLink={resolveLink} onOpenLink={followNoteLink} backLabel={trailPrevious ? `Back to ${trailPrevious.name}` : 'Back to files'} tags={tags} onToggleTag={id => toggleFileTag(editorFile.id, id)} onCreateTag={name => createCustomTag(name, editorFile.id)} /> : <>
       <header className="mode-bar"><button className="icon-button mobile-navigation-toggle" aria-label="Open navigation" aria-expanded={sidebarOpen} onClick={() => setSidebarOpen(value => !value)}><Icon name="list" /></button><div className="mode-switch" aria-label="Library mode"><button className={preferences.mode === 'find' ? 'active' : ''} aria-pressed={preferences.mode === 'find'} onClick={() => setPreferences(previous => ({ ...previous, mode: 'find' }))}><SearchIcon name="grid" size={15} />Find code</button><button className={preferences.mode === 'explorer' ? 'active' : ''} aria-pressed={preferences.mode === 'explorer'} onClick={() => setPreferences(previous => ({ ...previous, mode: 'explorer' }))}><Icon name="list" size={15} />Explorer</button></div><Suspense fallback={<span className="cloud-loading">Account & backup</span>}><CloudLibrary library={library} onLoad={loadCloudLibrary} /></Suspense></header>
-      {preferences.mode === 'find' ? <SearchMode nodes={nodes} tags={tags} query={query} onQuery={setQuery} searchRef={searchRef} tagFilter={tagFilter} onToggleFilter={toggleTagFilter} onCreateTag={createCustomTag} onClearFilters={() => setTagFilter([])} folderId={folderId} breadcrumb={breadcrumb} onNavigate={navigate} onBack={() => goHistory(-1)} canBack={history.index > 0} onEdit={openItem} onCreate={beginCreate} onCopy={copyCode} onSaveMetadata={saveMetadata} onToggleTag={toggleFileTag} storageError={storageError} /> : <>
+      {preferences.mode === 'find' ? <SearchMode nodes={nodes} tags={tags} query={query} onQuery={setQuery} searchRef={searchRef} tagFilter={tagFilter} onToggleFilter={toggleTagFilter} onCreateTag={createCustomTag} onClearFilters={() => setTagFilter([])} folderId={folderId} breadcrumb={breadcrumb} onNavigate={navigate} onBack={() => goHistory(-1)} canBack={history.index > 0} onEdit={openItem} onCreate={beginCreate} onCopy={copyCode} onSaveMetadata={saveMetadata} onToggleTag={toggleFileTag} storageError={storageError} resolveLink={resolveLink} /> : <>
       <div className="command-bar" role="toolbar" aria-label="File actions">
         <div className="command-group"><button className="toolbar-button" aria-label="New" aria-haspopup="menu" aria-expanded={menu?.kind === 'new'} onClick={event => showToolbarMenu(event, 'new')} disabled={!canCreate}><Icon name="plus" /><span>New</span><Icon name="down" size={11} /></button></div>
         <span className="toolbar-separator" />

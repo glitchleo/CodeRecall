@@ -182,7 +182,7 @@ export function copySectionText(section) {
 export function stripCopySectionTags(text = "") {
   const normalized = normalizeLineEndings(text);
   const { sections } = parseCopySections(normalized);
-  if (!sections.length) return normalized;
+  if (!sections.length) return String(text);
   const drop = new Set(sections.flatMap((section) => [section.start, section.end]));
   return normalized.split("\n").filter((_, index) => !drop.has(index)).join("\n");
 }
@@ -211,4 +211,33 @@ export function completeCopySection(text, start, end) {
   const closer = `${indent}${lead}</copy-sec>${closeComment ? ` ${closeComment}` : ""}`;
   const caret = start + openerTail.length + 1 + indent.length;
   return { text: `${text.slice(0, start)}${openerTail}\n${indent}\n${closer}${text.slice(lineEnd)}`, start: caret, end: caret };
+}
+
+/**
+ * Shortcut helper. With a selection: wraps the selected lines in a copy section.
+ * On a blank line: turns it into an empty section. On a code line: adds an empty
+ * section below it. The caret lands inside an empty section, or after a wrapped one.
+ */
+export function insertCopySection(text, start, end) {
+  ({ text, start, end } = selection(text, start, end));
+  const lineStart = start === 0 ? 0 : text.lastIndexOf("\n", start - 1) + 1;
+  const ranged = end > start;
+  const lastPosition = ranged && text[end - 1] === "\n" ? end - 1 : end;
+  let lineEnd = text.indexOf("\n", lastPosition);
+  if (lineEnd === -1) lineEnd = text.length;
+  const block = text.slice(lineStart, lineEnd);
+  const indent = block.match(/^[\t ]*/)[0];
+  const open = `${indent}<copy-sec>`;
+  const close = `${indent}</copy-sec>`;
+  if (ranged && block.trim() !== "") {
+    const wrapped = `${open}\n${block}\n${close}`;
+    const caret = lineStart + wrapped.length;
+    return { text: text.slice(0, lineStart) + wrapped + text.slice(lineEnd), start: caret, end: caret };
+  }
+  const empty = `${open}\n${indent}\n${close}`;
+  const insertAt = block.trim() === "" ? lineStart : lineEnd;
+  const prefix = block.trim() === "" ? "" : "\n";
+  const caret = insertAt + prefix.length + open.length + 1 + indent.length;
+  const replaced = block.trim() === "" ? lineEnd : lineEnd;
+  return { text: text.slice(0, insertAt) + prefix + empty + text.slice(replaced), start: caret, end: caret };
 }
