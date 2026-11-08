@@ -129,7 +129,7 @@ export function updateFileContent(nodes, id, content) {
 }
 
 /** Save code and its explanatory document together so Save/Discard is atomic. */
-export function updateFileDocument(nodes, id, content, notes, copySections) {
+export function updateFileDocument(nodes, id, content, notes) {
   const item = requireItem(nodes, id);
   if (item.type !== 'file') throw new Error('Choose a file to edit.');
   if (typeof content !== 'string') throw new Error('File content must be text.');
@@ -140,18 +140,10 @@ export function updateFileDocument(nodes, id, content, notes, copySections) {
     throw new Error('File notes must contain valid text and formatting, with 4000 characters or fewer.');
   }
   const normalized = normalizeNotes(notes);
-  const sectionsEqual = copySections === undefined || JSON.stringify(item.copySections || []) === JSON.stringify(copySections || []);
-  if ((item.content ?? '') === content && equalNotes(item, normalized) && sectionsEqual) return nodes;
+  if ((item.content ?? '') === content && equalNotes(item, normalized)) return nodes;
   const updatedAt = new Date().toISOString();
   const sizeBytes = new TextEncoder().encode(content).byteLength;
-  return nodes.map(node => node.id === id ? {
-    ...node,
-    content,
-    sizeBytes,
-    ...normalized,
-    ...(copySections !== undefined ? { copySections: Array.isArray(copySections) ? copySections : [] } : {}),
-    updatedAt,
-  } : node);
+  return nodes.map(node => node.id === id ? { ...node, content, sizeBytes, ...normalized, updatedAt } : node);
 }
 
 /** Search metadata belongs to folders and files; empty icon IDs restore automatic icons. */
@@ -275,8 +267,6 @@ export function validateStoredNodes(value) {
       if (typeof node.id !== "string" || !node.id.trim() || byId.has(node.id)) return false;
       if (!TYPES.has(node.type) || cleanName(node.name) !== node.name || typeof node.starred !== "boolean") return false;
       if ("content" in node && (node.type !== "file" || typeof node.content !== "string")) return false;
-      if ("copySections" in node && (!Array.isArray(node.copySections)
-        || !node.copySections.every(s => s && Number.isInteger(s.start) && Number.isInteger(s.end) && s.start >= 0 && s.end >= s.start))) return false;
       if ("tagIds" in node && (!Array.isArray(node.tagIds)
         || !node.tagIds.every((id) => typeof id === "string" && Boolean(id.trim()))
         || new Set(node.tagIds).size !== node.tagIds.length)) return false;

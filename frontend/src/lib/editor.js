@@ -6,29 +6,20 @@ export function normalizeLineEndings(text = "") {
   return String(text).replace(/\r\n?/g, "\n");
 }
 
-function selection(text, start = 0, end = start, sections = undefined) {
+function selection(text, start = 0, end = start) {
   const bound = (offset) => Math.min(text.length, Math.max(0, Number.isFinite(offset) ? Math.trunc(offset) : 0));
   const from = bound(start);
   const to = bound(end);
-  const result = { text, start: Math.min(from, to), end: Math.max(from, to) };
-  if (sections !== undefined) result.sections = sections;
-  return result;
+  return { text, start: Math.min(from, to), end: Math.max(from, to) };
 }
 
-export function equalSections(a = [], b = []) {
-  if (a === b) return true;
-  if (!a && !b) return true;
-  if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) return false;
-  return a.every((s, i) => s && b[i] && s.start === b[i].start && s.end === b[i].end);
-}
-
-export function createEditorState(text = "", sections = undefined) {
-  return { present: selection(String(text), 0, 0, sections), past: [], future: [] };
+export function createEditorState(text = "") {
+  return { present: selection(String(text)), past: [], future: [] };
 }
 
 /** Selection changes never create history entries or discard redo history. */
 export function selectEditorRange(state, start, end = start) {
-  const present = selection(state.present.text, start, end, state.present.sections);
+  const present = selection(state.present.text, start, end);
   if (present.start === state.present.start && present.end === state.present.end) return state;
   return { ...state, present, lastEdit: null };
 }
@@ -54,14 +45,10 @@ function editDirection(previous, next, group) {
 
 /** Record text edits; consecutive uninterrupted typing/deletion can share one undo step. */
 export function recordEdit(state, snapshot, { group = null, time = Date.now() } = {}) {
-  const sections = snapshot.sections ?? state.present.sections;
-  const present = selection(String(snapshot.text), snapshot.start, snapshot.end, sections);
-  if (present.text === state.present.text && equalSections(present.sections, state.present.sections)) {
-    return selectEditorRange(state, present.start, present.end);
-  }
+  const present = selection(String(snapshot.text), snapshot.start, snapshot.end);
+  if (present.text === state.present.text) return selectEditorRange(state, present.start, present.end);
   const direction = editDirection(state.present, present, group);
-  const sectionsChanged = !equalSections(present.sections, state.present.sections);
-  const canGroup = !sectionsChanged && direction !== null && Number.isFinite(time) && state.future.length === 0
+  const canGroup = direction !== null && Number.isFinite(time) && state.future.length === 0
     && state.lastEdit?.group === group && state.lastEdit?.direction === direction
     && time >= state.lastEdit.time && time - state.lastEdit.time <= GROUP_DELAY;
   return {
@@ -69,7 +56,7 @@ export function recordEdit(state, snapshot, { group = null, time = Date.now() } 
     present,
     past: canGroup ? state.past : [...state.past, state.present].slice(-EDITOR_HISTORY_LIMIT),
     future: [],
-    lastEdit: direction && !sectionsChanged && Number.isFinite(time) ? { group, direction, time } : null,
+    lastEdit: direction && Number.isFinite(time) ? { group, direction, time } : null,
   };
 }
 
@@ -253,244 +240,4 @@ export function insertCopySection(text, start, end) {
   const caret = insertAt + prefix.length + open.length + 1 + indent.length;
   const replaced = block.trim() === "" ? lineEnd : lineEnd;
   return { text: text.slice(0, insertAt) + prefix + empty + text.slice(replaced), start: caret, end: caret };
-}
-
-/* ------------------------------------------------------------------ *
- * Tagless copy sections: line ranges [start, end]
- * No <copy-sec> tags inside the file content.
- * ------------------------------------------------------------------ */
-
-export function findChangeRange(oldText = "", newText = "") {
-  let start = 0;
-  while (start < oldText.length && start < newText.length && oldText[start] === newText[start]) {
-    start++;
-  }
-  let oldEnd = oldText.length;
-  let newEnd = newText.length;
-  while (oldEnd > start && newEnd > start && oldText[oldEnd - 1] === newText[newEnd - 1]) {
-    oldEnd--;
-    newEnd--;
-  }
-  return { start, oldEnd, newEnd };
-}
-
-export function sanitizeSections(sections = [], totalLines = 0) {
-  if (!Array.isArray(sections)) return [];
-  const valid = [];
-  for (const s of sections) {
-    if (!s || !Number.isInteger(s.start) || !Number.isInteger(s.end)) continue;
-    const start = Math.max(0, s.start);
-    const end = Math.max(start, s.end);
-    if (totalLines > 0 && start >= totalLines) continue;
-    valid.push({ start, end: totalLines > 0 ? Math.min(totalLines - 1, end) : end });
-  }
-  valid.sort((a, b) => a.start - b.start);
-  const result = [];
-  for (const s of valid) {
-    if (result.length === 0) {
-      result.push(s);
-    } else {
-      const last = result[result.length - 1];
-      if (s.start <= last.end) {
-        last.end = Math.max(last.end, s.end);
-      } else {
-        result.push(s);
-      }
-    }
-  }
-  return result;
-}
-
-export function adjustSectionsOnEdit(sections = [], oldText = "", newText = "") {
-  if (!Array.isArray(sections) || sections.length === 0) return [];
-  if (oldText === newText) return sections;
-
-  const { start, oldEnd, newEnd } = findChangeRange(oldText, newText);
-
-  const changeStartLine = oldText.slice(0, start).split("\n").length - 1;
-  const removedText = oldText.slice(start, oldEnd);
-  const changeOldEndLine = changeStartLine + (removedText.split("\n").length - 1);
-  const linesRemoved = changeOldEndLine - changeStartLine;
-
-  const insertedText = newText.slice(start, newEnd);
-  const linesInserted = insertedText.split("\n").length - 1;
-  const lineDelta = linesInserted - linesRemoved;
-
-  const nextSections = [];
-  for (const s of sections) {
-    const sStart = s.start;
-    const sEnd = s.end;
-
-    // 1. Edit strictly after this section
-    if (changeStartLine > sEnd) {
-      nextSections.push({ start: sStart, end: sEnd });
-      continue;
-    }
-
-    // 2. Edit strictly before this section
-    if (changeOldEndLine < sStart) {
-      const nextStart = sStart + lineDelta;
-      const nextEnd = sEnd + lineDelta;
-      if (nextStart >= 0 && nextEnd >= nextStart) {
-        nextSections.push({ start: nextStart, end: nextEnd });
-      }
-      continue;
-    }
-
-    // 3. Edit envelopes the whole section (it was deleted)
-    if (changeStartLine <= sStart && changeOldEndLine >= sEnd) {
-      continue;
-    }
-
-    // 4. Edit is strictly inside the section
-    if (changeStartLine >= sStart && changeOldEndLine <= sEnd) {
-      const nextEnd = sEnd + lineDelta;
-      if (nextEnd >= sStart) {
-        nextSections.push({ start: sStart, end: nextEnd });
-      }
-      continue;
-    }
-
-    // 5. Edit overlaps start of section
-    if (changeStartLine < sStart && changeOldEndLine >= sStart) {
-      const nextStart = changeStartLine + linesInserted;
-      const nextEnd = sEnd + lineDelta;
-      if (nextStart <= nextEnd) {
-        nextSections.push({ start: nextStart, end: nextEnd });
-      }
-      continue;
-    }
-
-    // 6. Edit overlaps end of section
-    if (changeStartLine <= sEnd && changeOldEndLine > sEnd) {
-      const nextEnd = changeStartLine;
-      if (sStart <= nextEnd) {
-        nextSections.push({ start: sStart, end: nextEnd });
-      }
-      continue;
-    }
-  }
-
-  return sanitizeSections(nextSections, newText.split("\n").length);
-}
-
-export function isRangeIntersectingSections(sections = [], firstLine, lastLine) {
-  if (!Array.isArray(sections) || sections.length === 0) return false;
-  return sections.some((s) => !(lastLine < s.start || firstLine > s.end));
-}
-
-export function createTaglessCopySection(text = "", start = 0, end = start, sections = []) {
-  const normalized = normalizeLineEndings(text);
-  const bound = (offset) => Math.min(normalized.length, Math.max(0, Number.isFinite(offset) ? Math.trunc(offset) : 0));
-  const from = Math.min(bound(start), bound(end));
-  const to = Math.max(bound(start), bound(end));
-  const lines = normalized.split("\n");
-
-  const firstLine = normalized.slice(0, from).split("\n").length - 1;
-  let lastLine = firstLine;
-  if (to > from) {
-    const endOffset = (to > from && normalized[to - 1] === "\n") ? to - 1 : to;
-    lastLine = normalized.slice(0, endOffset).split("\n").length - 1;
-  }
-
-  // If selection intersects any existing section (inside, outside, or spanning), do not create
-  if (isRangeIntersectingSections(sections, firstLine, lastLine)) {
-    return null;
-  }
-
-  if (to > from) {
-    let nextText = normalized;
-    if (lastLine === lines.length - 1) {
-      nextText += "\n";
-    }
-    const newSection = { start: firstLine, end: lastLine };
-    const nextSections = sanitizeSections([...sections, newSection], nextText.split("\n").length);
-    return { text: nextText, start: from, end: to, sections: nextSections };
-  }
-
-  // Caret on a single line
-  const currentLineText = lines[firstLine] ?? "";
-  if (currentLineText === "") {
-    let nextText = normalized;
-    if (firstLine === lines.length - 1) {
-      nextText += "\n";
-    }
-    const newSection = { start: firstLine, end: firstLine };
-    const nextSections = sanitizeSections([...sections, newSection], nextText.split("\n").length);
-    const lineStart = normalized.slice(0, from).lastIndexOf("\n");
-    const caret = lineStart === -1 ? 0 : lineStart + 1;
-    return { text: nextText, start: caret, end: caret, sections: nextSections };
-  } else {
-    const newlinePos = normalized.indexOf("\n", from);
-    const insertAt = newlinePos === -1 ? normalized.length : newlinePos;
-    const isAtEof = newlinePos === -1;
-    const inserted = isAtEof ? "\n\n" : "\n";
-    const nextText = normalized.slice(0, insertAt) + inserted + normalized.slice(insertAt);
-    const sectionLine = firstLine + 1;
-    const newSection = { start: sectionLine, end: sectionLine };
-    const nextSections = sanitizeSections([...sections, newSection], nextText.split("\n").length);
-    const caret = insertAt + 1;
-    return { text: nextText, start: caret, end: caret, sections: nextSections };
-  }
-}
-
-export function handleEnterInsideSection(text = "", start = 0, end = start, sections = []) {
-  const normalized = normalizeLineEndings(text);
-  const bound = (offset) => Math.min(normalized.length, Math.max(0, Number.isFinite(offset) ? Math.trunc(offset) : 0));
-  const from = Math.min(bound(start), bound(end));
-  const cursorLine = normalized.slice(0, from).split("\n").length - 1;
-
-  const sectionIndex = sections.findIndex((s) => cursorLine >= s.start && cursorLine <= s.end);
-  const lineBreak = insertLineBreak(normalized, start, end);
-  let nextText = lineBreak.text;
-  const nextStart = lineBreak.start;
-  const nextEnd = lineBreak.end;
-
-  if (sectionIndex === -1) {
-    const nextSections = sections.map((s) => s.start > cursorLine ? { start: s.start + 1, end: s.end + 1 } : s);
-    return { text: nextText, start: nextStart, end: nextEnd, sections: nextSections };
-  }
-
-  const targetSection = sections[sectionIndex];
-  const expandedEnd = targetSection.end + 1;
-
-  const nextSections = sections.map((s, idx) => {
-    if (idx === sectionIndex) return { start: s.start, end: expandedEnd };
-    if (s.start > cursorLine) return { start: s.start + 1, end: s.end + 1 };
-    return s;
-  });
-
-  const nextLines = nextText.split("\n");
-  if (expandedEnd === nextLines.length - 1) {
-    nextText += "\n";
-  }
-
-  return { text: nextText, start: nextStart, end: nextEnd, sections: sanitizeSections(nextSections, nextText.split("\n").length) };
-}
-
-export function handleArrowDownAtSectionEnd(text = "", start = 0, end = start, sections = []) {
-  const normalized = normalizeLineEndings(text);
-  const bound = (offset) => Math.min(normalized.length, Math.max(0, Number.isFinite(offset) ? Math.trunc(offset) : 0));
-  const from = Math.min(bound(start), bound(end));
-  const lines = normalized.split("\n");
-  const cursorLine = normalized.slice(0, from).split("\n").length - 1;
-
-  const section = sections.find((s) => s.end === cursorLine);
-  if (!section) return null;
-
-  if (section.end === lines.length - 1) {
-    const nextText = normalized + "\n";
-    const nextCaret = nextText.length;
-    return { text: nextText, start: nextCaret, end: nextCaret, sections };
-  }
-
-  return null;
-}
-
-export function getSectionCode(text = "", section) {
-  if (!section) return "";
-  const lines = normalizeLineEndings(text).split("\n");
-  if (section.start >= lines.length) return "";
-  const end = Math.min(lines.length - 1, section.end);
-  return lines.slice(section.start, end + 1).join("\n");
 }
