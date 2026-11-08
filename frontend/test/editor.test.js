@@ -3,6 +3,8 @@ import assert from "node:assert/strict";
 import {
   EDITOR_HISTORY_LIMIT, createEditorState, recordEdit, undoEdit, redoEdit,
   selectEditorRange, indentSelection, insertLineBreak, normalizeLineEndings,
+  createTaglessCopySection, handleEnterInsideSection, handleArrowDownAtSectionEnd,
+  adjustSectionsOnEdit, isRangeIntersectingSections, getSectionCode,
 } from "../src/lib/editor.js";
 
 const snapshot = (text, start = text.length, end = start) => ({ text, start, end });
@@ -130,4 +132,105 @@ test("Unicode offsets follow textarea UTF-16 indexing and normalization handles 
   assert.deepEqual(undoEdit(state).present, snapshot(text, 2));
   assert.deepEqual(indentSelection(text, 2, 2), snapshot("😀     café", 6));
   assert.equal(normalizeLineEndings("a\r\nb\rc\nd"), "a\nb\nc\nd");
+});
+
+test("tagless copy sections: create on empty line initializes line below", () => {
+  const result = createTaglessCopySection("", 0, 0, []);
+  assert.ok(result);
+  assert.equal(result.text, "\n");
+  assert.deepEqual(result.sections, [{ start: 0, end: 0 }]);
+  assert.equal(result.start, 0);
+  assert.equal(result.end, 0);
+
+  // Deleting the line deletes the copy section as well
+  const afterDelete = adjustSectionsOnEdit(result.sections, "\n", "");
+  assert.deepEqual(afterDelete, []);
+});
+
+test("tagless copy sections: selecting multiple lines creates a section covering all selected lines", () => {
+  const text = "const a = 1;\nconst b = 2;\nconst c = 3;";
+  // Select lines 0 and 1
+  const from = 0;
+  const to = 25; // covers first two lines
+  const result = createTaglessCopySection(text, from, to, []);
+  assert.ok(result);
+  assert.deepEqual(result.sections, [{ start: 0, end: 1 }]);
+  assert.equal(getSectionCode(result.text, result.sections[0]), "const a = 1;\nconst b = 2;");
+
+  // If section ends at EOF, a line is initialized below
+  const eofResult = createTaglessCopySection(text, 13, text.length, []);
+  assert.ok(eofResult);
+  assert.equal(eofResult.text, text + "\n");
+  assert.deepEqual(eofResult.sections, [{ start: 1, end: 2 }]);
+});
+
+test("tagless copy sections: cannot create section when cursor or selection intersects existing section", () => {
+  const text = "line0\nline1\nline2\nline3\nline4\nline5";
+  const sections = [{ start: 2, end: 3 }];
+
+  // Caret inside section (line 2)
+  const line2Offset = text.indexOf("line2") + 2;
+  assert.equal(createTaglessCopySection(text, line2Offset, line2Offset, sections), null);
+
+  // Selection inside section
+  const line3Offset = text.indexOf("line3") + 3;
+  assert.equal(createTaglessCopySection(text, line2Offset, line3Offset, sections), null);
+
+  // Selection partially inside and partially outside (line 1 to line 2)
+  const line1Offset = text.indexOf("line1");
+  assert.equal(createTaglessCopySection(text, line1Offset, line2Offset, sections), null);
+
+  // Selection spanning over section (line 1 to line 4)
+  const line4Offset = text.indexOf("line4");
+  assert.equal(createTaglessCopySection(text, line1Offset, line4Offset, sections), null);
+
+  // Selection completely outside (line 0) succeeds
+  assert.ok(createTaglessCopySection(text, 0, 5, sections));
+});
+
+test("tagless copy sections: enter inside section expands it and ensures line below", () => {
+  const text = "const a = 1;\nconst b = 2;\n";
+  const sections = [{ start: 0, end: 1 }];
+
+  // Press enter in the middle of line 0
+  const enterAtStart = handleEnterInsideSection(text, 6, 6, sections);
+  assert.deepEqual(enterAtStart.sections, [{ start: 0, end: 2 }]);
+  assert.equal(enterAtStart.text, "const \na = 1;\nconst b = 2;\n");
+
+  // Press enter on the last line of section (line 2)
+  const lastLinePos = enterAtStart.text.indexOf("const b");
+  const enterAtLast = handleEnterInsideSection(enterAtStart.text, lastLinePos + 7, lastLinePos + 7, enterAtStart.sections);
+  assert.deepEqual(enterAtLast.sections, [{ start: 0, end: 3 }]);
+  // Line 3 is in section, line 4 is initialized below
+  assert.ok(enterAtLast.text.split("\n").length >= 5);
+});
+
+test("tagless copy sections: arrow down at section end at EOF initializes a line below", () => {
+  const text = "sectionLine";
+  const sections = [{ start: 0, end: 0 }];
+  const downResult = handleArrowDownAtSectionEnd(text, 5, 5, sections);
+  assert.ok(downResult);
+  assert.equal(downResult.text, "sectionLine\n");
+  assert.equal(downResult.start, downResult.text.length);
+});
+
+test("tagless copy sections: adjustSectionsOnEdit tracks edits, shrinks, and deletes sections", () => {
+  const text = "line0\nline1\nline2\nline3\nline4\n";
+  const sections = [{ start: 1, end: 3 }];
+
+  // Typing inside section retains section
+  const withTyping = "line0\nline1-edited\nline2\nline3\nline4\n";
+  assert.deepEqual(adjustSectionsOnEdit(sections, text, withTyping), [{ start: 1, end: 3 }]);
+
+  // Deleting a line inside section shrinks section
+  const withLineRemoved = "line0\nline1\nline3\nline4\n";
+  assert.deepEqual(adjustSectionsOnEdit(sections, text, withLineRemoved), [{ start: 1, end: 2 }]);
+
+  // Deleting all lines of section removes section
+  const allSectionRemoved = "line0\nline4\n";
+  assert.deepEqual(adjustSectionsOnEdit(sections, text, allSectionRemoved), []);
+
+  // Adding lines before section shifts section down
+  const linesBefore = "new1\nnew2\n" + text;
+  assert.deepEqual(adjustSectionsOnEdit(sections, text, linesBefore), [{ start: 3, end: 5 }]);
 });

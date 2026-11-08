@@ -334,14 +334,20 @@ input::placeholder { color: #a0a0a0; opacity: 1; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
 }
-/* Navigation menu: the CodeRecall title stays put; pressing it hides or shows everything under it */
-.brand-toggle { display: flex; align-items: center; gap: 9px; flex: 0 1 auto; min-width: 0; padding: 0 6px 0 0; border-radius: 3px; font: inherit; }
+/* Navigation menu: pressing the logo closes the left menu, expanding the page */
+.brand-toggle { display: inline-flex; align-items: center; gap: 8px; flex: 0 0 auto; min-width: 0; height: 32px; padding: 0 8px; border-radius: 3px; font: inherit; font-weight: 600; color: var(--text); }
 .brand-toggle:hover { background: #2c2c2c; }
+.brand-title { font-size: 13px; font-weight: 600; letter-spacing: -0.2px; }
 .brand-toggle::after { content: ''; flex: 0 0 auto; width: 5px; height: 5px; margin-left: 2px; border: solid #8a8a8a; border-width: 0 1.5px 1.5px 0; transform: translateY(-1px) rotate(45deg); transition: transform .15s; }
-.sidebar-collapsed .brand-toggle::after { transform: rotate(-45deg); }
+.sidebar-collapsed .brand-toggle::after { transform: translateY(0) rotate(-45deg); }
+.brand-separator { margin: 0 4px; }
+.sidebar-mobile-header { display: none; }
+@media (max-width: 850px) {
+  .sidebar-mobile-header { display: flex; justify-content: flex-end; padding: 4px 6px 8px; border-bottom: 1px solid var(--border); margin-bottom: 8px; }
+}
 @media (min-width: 851px) {
-  .app-shell.sidebar-collapsed { grid-template-columns: 148px minmax(0, 1fr); }
-  .sidebar-collapsed .roots-section, .sidebar-collapsed .starred-section { display: none; }
+  .app-shell.sidebar-collapsed { grid-template-columns: 0px minmax(0, 1fr); }
+  .sidebar-collapsed .sidebar { display: none; }
   /* Shorter path box, longer search box (explorer and Find) */
   .address-bar { flex: 0 1 300px; }
   .address-bar:focus-within { flex-basis: 460px; }
