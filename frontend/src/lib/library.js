@@ -1,4 +1,5 @@
 import { normalizeNotes, equalNotes, validNoteText, validateDescriptionFormat } from './notes.js';
+import { validCopySectionShape, sanitizeCopySections, sameStored } from './copySections.js';
 
 /** The library is a flat tree. `null` represents the library root. */
 export const ROOT_ID = null;
@@ -118,32 +119,46 @@ export function createItem(nodes, { parentId = ROOT_ID, type, name } = {}) {
 }
 
 /** Legacy files without content are empty; unchanged text preserves the exact snapshot. */
-export function updateFileContent(nodes, id, content) {
+/** Copy sections are line ranges of the content. Without a fresh list, changed code drops them rather than keep stale ranges. */
+function withCopySections(node, content, copySections) {
+  const next = { ...node, content };
+  const sections = copySections === undefined
+    ? ((node.content ?? "") === content ? sanitizeCopySections(node.copySections, content) : [])
+    : sanitizeCopySections(copySections, content);
+  if (sections.length) next.copySections = sections;
+  else delete next.copySections;
+  return next;
+}
+
+export function updateFileContent(nodes, id, content, copySections) {
   const item = requireItem(nodes, id);
   if (item.type !== "file") throw new Error("Choose a file to edit.");
   if (typeof content !== "string") throw new Error("File content must be text.");
-  if ((item.content ?? "") === content) return nodes;
+  const sections = copySections === undefined ? undefined : sanitizeCopySections(copySections, content);
+  if ((item.content ?? "") === content && (sections === undefined || sameStored(sanitizeCopySections(item.copySections, content), sections))) return nodes;
   const updatedAt = new Date().toISOString();
   const sizeBytes = new TextEncoder().encode(content).byteLength;
-  return nodes.map((node) => node.id === id ? { ...node, content, sizeBytes, updatedAt } : node);
+  return nodes.map((node) => node.id === id ? { ...withCopySections(node, content, copySections), sizeBytes, updatedAt } : node);
 }
 
 /** Save code and its explanatory document together so Save/Discard is atomic. */
-export function updateFileDocument(nodes, id, content, notes) {
+export function updateFileDocument(nodes, id, content, notes, copySections) {
   const item = requireItem(nodes, id);
   if (item.type !== 'file') throw new Error('Choose a file to edit.');
   if (typeof content !== 'string') throw new Error('File content must be text.');
-  if (notes === undefined) return updateFileContent(nodes, id, content);
+  if (notes === undefined) return updateFileContent(nodes, id, content, copySections);
   if (!notes || typeof notes !== 'object' || Array.isArray(notes)
     || !validDescription(notes.description)
     || ('descriptionFormat' in notes && !validateDescriptionFormat(notes.descriptionFormat, notes.description))) {
     throw new Error('File notes must contain valid text and formatting, with 4000 characters or fewer.');
   }
   const normalized = normalizeNotes(notes);
-  if ((item.content ?? '') === content && equalNotes(item, normalized)) return nodes;
+  const sections = copySections === undefined ? undefined : sanitizeCopySections(copySections, content);
+  if ((item.content ?? '') === content && equalNotes(item, normalized)
+    && (sections === undefined || sameStored(sanitizeCopySections(item.copySections, content), sections))) return nodes;
   const updatedAt = new Date().toISOString();
   const sizeBytes = new TextEncoder().encode(content).byteLength;
-  return nodes.map(node => node.id === id ? { ...node, content, sizeBytes, ...normalized, updatedAt } : node);
+  return nodes.map(node => node.id === id ? { ...withCopySections(node, content, copySections), sizeBytes, ...normalized, updatedAt } : node);
 }
 
 /** Search metadata belongs to folders and files; empty icon IDs restore automatic icons. */
@@ -273,6 +288,7 @@ export function validateStoredNodes(value) {
       if ("description" in node && !validDescription(node.description)) return false;
       if ('descriptionFormat' in node && (node.type !== 'file' || !validateDescriptionFormat(node.descriptionFormat, node.description))) return false;
       if ("iconId" in node && !validIconId(node.iconId)) return false;
+      if ("copySections" in node && (node.type !== "file" || !validCopySectionShape(node.copySections))) return false;
       if (node.type === "file" && "sizeBytes" in node && (!Number.isInteger(node.sizeBytes) || node.sizeBytes < 0)) return false;
       if (node.parentId !== ROOT_ID && typeof node.parentId !== "string") return false;
       if (![node.createdAt, node.updatedAt].every((date) => typeof date === "string" && Number.isFinite(Date.parse(date)))) return false;

@@ -4,7 +4,7 @@ import TagPicker, { TagBadges } from './TagPicker.jsx';
 import MetadataPanel from './MetadataPanel.jsx';
 import { CodeTokens } from './SyntaxCode.jsx';
 import SectionedCode from './SectionedCode.jsx';
-import { parseCopySections, stripCopySectionTags } from './lib/editor.js';
+import { loadCodeDocument } from './lib/copySections.js';
 import { getAncestors } from './lib/library.js';
 import { buildSearchIndex } from './lib/search.js';
 import { getFileTags } from './lib/tags.js';
@@ -36,10 +36,11 @@ export function SearchIcon({ name, size = 18 }) {
 }
 
 // Small, bounded previews keep large snippets from making result cards expensive.
-export function CodeLines({ content = '', filename = '', preview = false }) {
-  // Full view: copy sections get border lines and a "c" button. Cards: the tag lines are simply left out.
-  if (!preview && parseCopySections(content).sections.length) return <SectionedCode content={content} filename={filename} />;
-  const text = preview ? stripCopySectionTags(content).slice(0, 6000).split('\n').slice(0, 12).join('\n') : content;
+export function CodeLines({ content = '', copySections, filename = '', preview = false }) {
+  // Copy sections are line ranges saved with the file. The full view draws them as bordered blocks with a "C" button.
+  const document_ = loadCodeDocument(content, copySections, { ensure: false });
+  if (!preview && document_.ranges.length) return <SectionedCode text={document_.text} ranges={document_.ranges} filename={filename} />;
+  const text = preview ? document_.text.slice(0, 6000).split('\n').slice(0, 12).join('\n') : document_.text;
   const code = <pre className={`snippet-code${preview ? ' snippet-code-preview' : ''}`}><code>{text ? <CodeTokens code={text} filename={filename} /> : <span className="code-empty">No code yet</span>}</code></pre>;
   return preview ? code : <div className="snippet-document"><pre className="snippet-read-gutter" aria-hidden="true">{text.split('\n').map((_, index) => index + 1).join('\n')}</pre>{code}</div>;
 }
@@ -51,7 +52,7 @@ function ResultCard({ item, tags, previews, childCount, path, onOpen, onEdit, on
     {item.type === 'folder' ? <div className="folder-card-body">
       <div className="folder-card-caption">{childCount} {childCount === 1 ? 'item' : 'items'}</div>
       <div className="folder-preview-list">{previews.map(({ item: child }) => <button key={child.id} className="folder-preview-row" onClick={() => onOpen(child)} title={`Open ${child.name}`}><ItemIcon item={child} size={18} /><span>{child.name}</span><SearchIcon name="arrow" size={14} /></button>)}{previews.length === 0 && <span className="folder-empty">Empty folder</span>}</div>
-    </div> : <button className="code-preview-button" onClick={() => onOpen(item)} aria-label={`Read ${item.name}`}><CodeLines content={item.content} filename={item.name} preview /><span className="code-preview-fade" /></button>}
+    </div> : <button className="code-preview-button" onClick={() => onOpen(item)} aria-label={`Read ${item.name}`}><CodeLines content={item.content} copySections={item.copySections} filename={item.name} preview /><span className="code-preview-fade" /></button>}
     {(item.description || assigned.length > 0) && <div className="result-card-meta">{item.description && <p className="result-description" title={item.description}>{item.description}</p>}{assigned.length > 0 && <div className="result-tags"><TagBadges tags={assigned.slice(0, 3)} />{assigned.length > 3 && <span className="more-tags">+{assigned.length - 3}</span>}</div>}</div>}
     <footer className="result-card-footer"><span className="result-location" title={path || ROOT_LABEL}>{path || ROOT_LABEL}</span><div>
       {item.type === 'file' && <><button title={`Copy code from ${item.name}`} aria-label={`Copy code from ${item.name}`} onClick={() => onCopy(item)}><SearchIcon name="copy" size={15} /></button><button title={`Edit ${item.name}`} aria-label={`Edit ${item.name}`} onClick={() => onEdit(item)}><SearchIcon name="edit" size={15} /></button></>}
@@ -182,7 +183,7 @@ function ItemViewer({ item, nodes, tags, detailsOnly, resolveLink, onOpenLink, b
       <span className="viewer-code-caption">Source preview</span>
       <div className="viewer-panel-controls"><button className={notesMode !== 'hidden' ? 'active' : ''} aria-pressed={notesMode !== 'hidden'} aria-label={notesMode === 'hidden' ? 'Show notes panel' : 'Hide notes panel'} title={notesMode === 'hidden' ? 'Show notes panel' : 'Hide notes panel'} onClick={() => setNotesMode(mode => mode === 'hidden' ? 'split' : 'hidden')}><SearchIcon name="notes" size={15} /><span>Notes</span></button>{notesMode !== 'hidden' && <button aria-label={notesMode === 'full' ? 'Restore split view' : 'Expand notes to full width'} title={notesMode === 'full' ? 'Restore split view' : 'Expand notes to full width'} onClick={() => setNotesMode(mode => mode === 'full' ? 'split' : 'full')}><SearchIcon name={notesMode === 'full' ? 'split' : 'expand'} size={15} /></button>}</div>
     </div>}
-    <div ref={bodyRef} className={`viewer-body viewer-notes-${notesMode} viewer-mobile-${mobilePane}`} style={{ '--viewer-notes-width': `${notesWidth}%` }}>{!detailsOnly && <div className="viewer-code" tabIndex={0} aria-label="Full code, scroll to read"><CodeLines content={item.content} filename={item.name} /></div>}
+    <div ref={bodyRef} className={`viewer-body viewer-notes-${notesMode} viewer-mobile-${mobilePane}`} style={{ '--viewer-notes-width': `${notesWidth}%` }}>{!detailsOnly && <div className="viewer-code" tabIndex={0} aria-label="Full code, scroll to read"><CodeLines content={item.content} copySections={item.copySections} filename={item.name} /></div>}
       {!detailsOnly && <div className="viewer-resizer" role="separator" aria-label="Resize notes panel" aria-orientation="vertical" aria-valuemin={20} aria-valuemax={75} aria-valuenow={Math.round(notesWidth)} tabIndex={0} onKeyDown={event => { if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') { event.preventDefault(); changeWidth(notesWidth + (event.key === 'ArrowLeft' ? 2 : -2)); } }} onPointerDown={event => { event.preventDefault(); event.currentTarget.setPointerCapture(event.pointerId); resizeNotes(event.clientX); }} onPointerMove={event => { if (event.currentTarget.hasPointerCapture(event.pointerId)) resizeNotes(event.clientX); }} onPointerUp={event => { if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId); }} />}
       <aside className="viewer-details" aria-label="Description and tags"><div className="viewer-type">{getItemType(item)}</div><MetadataPanel ref={metadataRef} item={item} tags={tags} resolveLink={resolveLink} onOpenLink={requestLink} onSave={onSaveMetadata} onToggleTag={onToggleTag} onCreateTag={onCreateTag} /><dl className="viewer-dates"><dt>Last updated</dt><dd>{formatDateTime(item.updatedAt)}</dd><dt>Created</dt><dd>{formatDateTime(item.createdAt)}</dd></dl></aside></div>
   </section></div>;

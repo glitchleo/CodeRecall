@@ -1,5 +1,6 @@
 import React, { forwardRef, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { createEditorState, recordEdit, undoEdit, redoEdit, selectEditorRange, indentSelection, insertLineBreak, normalizeLineEndings, parseCopySections, completeCopySection, insertCopySection } from './lib/editor.js';
+import { createEditorState, recordEdit, undoEdit, redoEdit, selectEditorRange, indentSelection, insertLineBreak, normalizeLineEndings } from './lib/editor.js';
+import { loadCodeDocument, deriveEdit, mapSectionsThroughEdit, ensureSectionGaps, createCopySection, countLines, toStored, sameRanges } from './lib/copySections.js';
 import { copyText } from './lib/clipboard.js';
 import TagPicker, { TagBadges } from './TagPicker.jsx';
 import ItemIcon from './ItemIcon.jsx';
@@ -34,8 +35,12 @@ function byteLabel(text) {
 const CodeEditor = forwardRef(function CodeEditor({ file, path, onSave, onClose, onDirtyChange, persistenceError = false, tags = [], onToggleTag, onCreateTag, resolveLink, onOpenLink, backLabel = 'Back to files' }, ref) {
   // A textarea uses LF offsets. Normalize the draft and its saved comparison
   // together; opening a CRLF file alone never marks it dirty or saves it.
-  const initialText = normalizeLineEndings(typeof file.content === 'string' ? file.content : '');
-  const [history, setHistory] = useState(() => createEditorState(initialText));
+  // Copy sections are stored as line ranges next to the code (never as text in it).
+  const [initialDocument] = useState(() => loadCodeDocument(file.content, file.copySections));
+  const initialText = initialDocument.text;
+  const [history, setHistory] = useState(() => createEditorState(initialText, initialDocument.ranges));
+  const [savedSections, setSavedSections] = useState(initialDocument.ranges);
+  const savedSectionsRef = useRef(initialDocument.ranges);
   const historyRef = useRef(history);
   const [savedText, setSavedText] = useState(initialText);
   const savedTextRef = useRef(initialText);
@@ -72,15 +77,14 @@ const CodeEditor = forwardRef(function CodeEditor({ file, path, onSave, onClose,
   dirtyCallbackRef.current = onDirtyChange;
 
   const text = history.present.text;
-  const dirty = text !== savedText || !equalNotes(notes, savedNotes) || persistenceError;
+  const sections = history.present.sections ?? [];
+  const dirty = text !== savedText || !sameRanges(sections, savedSections) || !equalNotes(notes, savedNotes) || persistenceError;
   const visibleSaveError = saveError || (persistenceError ? 'Browser storage is unavailable. Save to retry keeping this file.' : '');
   const dirtyRef = useRef(dirty);
   dirtyRef.current = dirty;
   const lines = useMemo(() => normalizeLineEndings(text).split('\n'), [text]);
   const cursorLines = normalizeLineEndings(text.slice(0, history.present.end)).split('\n');
-  const cursorRow = cursorLines.length - 1;
   const language = getFileLanguage(file.name);
-  const { sections, orphans } = useMemo(() => parseCopySections(text), [text]);
   const lineTops = useMemo(() => {
     const tops = [0];
     for (let index = 0; index < lines.length; index += 1) tops.push(tops[index] + (wrap ? lineHeights[index] || 22 : 22));
@@ -132,14 +136,15 @@ const CodeEditor = forwardRef(function CodeEditor({ file, path, onSave, onClose,
 
   const save = useCallback((restoreFocus = true) => {
     const content = historyRef.current.present.text;
+    const currentSections = historyRef.current.present.sections ?? [];
     const currentNotes = notesRef.current;
-    if (content === savedTextRef.current && equalNotes(currentNotes, savedNotesRef.current) && !persistenceError) {
+    if (content === savedTextRef.current && sameRanges(currentSections, savedSectionsRef.current) && equalNotes(currentNotes, savedNotesRef.current) && !persistenceError) {
       setSaveError('');
       if (restoreFocus) focusInput();
       return true;
     }
     try {
-      const result = onSave(content, currentNotes);
+      const result = onSave(content, currentNotes, toStored(currentSections));
       if (!result?.ok) {
         setSaveError(result?.message || 'Could not save this file. Your changes are still open here.');
         if (restoreFocus) focusInput();
@@ -147,6 +152,8 @@ const CodeEditor = forwardRef(function CodeEditor({ file, path, onSave, onClose,
       }
       savedTextRef.current = content;
       setSavedText(content);
+      savedSectionsRef.current = currentSections;
+      setSavedSections(currentSections);
       savedNotesRef.current = currentNotes;
       setSavedNotes(currentNotes);
       dirtyRef.current = false;
@@ -181,8 +188,9 @@ const CodeEditor = forwardRef(function CodeEditor({ file, path, onSave, onClose,
   }, [requestClose, file.id]);
 
   const copySection = async (section) => {
-    if (!section.code) return;
-    const ok = await copyText(section.code);
+    const code = lines.slice(section.start, section.end + 1).join('\n');
+    if (!code) return;
+    const ok = await copyText(code);
     focusInput();
     if (!ok) { setSaveError('Could not copy to the clipboard. Select the section and copy it manually.'); return; }
     setCopiedSection(section.start);
@@ -260,27 +268,35 @@ const CodeEditor = forwardRef(function CodeEditor({ file, path, onSave, onClose,
     setSaveError('');
   };
 
+  // Every text edit goes through here: the copy sections are re-aimed at the edited text and a free
+  // line is kept below each section, so sections follow the code as you type, paste, split and delete lines.
+  const commit = (next, group = null) => {
+    const previous = historyRef.current.present;
+    let ranges = previous.sections ?? [];
+    if (ranges.length && countLines(next.text) !== countLines(previous.text)) {
+      ranges = mapSectionsThroughEdit(previous.text, deriveEdit(previous.text, previous.start, previous.end, next.text, next.start), ranges);
+    }
+    const fixed = ensureSectionGaps(next.text, ranges, [next.start, next.end]);
+    edit({ text: fixed.text, start: fixed.offsets[0], end: fixed.offsets[1], sections: fixed.sections }, group);
+  };
+
   const handleChange = (event) => {
     const input = event.target;
     const inputType = event.nativeEvent.inputType || '';
     const group = inputType.startsWith('delete') ? 'delete' : inputType === 'insertText' ? 'typing' : null;
-    const typed = { text: input.value, start: input.selectionStart, end: input.selectionEnd };
-    edit(typed, group);
-    // Typing the ">" of <copy-sec> on its own line adds the blank line and closing tag as a separate undo step.
-    if (inputType === 'insertText' && event.nativeEvent.data === '>') {
-      const completed = completeCopySection(typed.text, typed.start, typed.end);
-      if (completed) edit(completed);
-    }
+    commit({ text: input.value, start: input.selectionStart, end: input.selectionEnd }, group);
   };
 
-  // Wraps the selected lines in a copy section, or adds an empty one (Alt+Shift+C).
+  // Alt+Shift+C: selected lines become a copy section, or a new empty line is added as one.
+  // Nothing happens when the caret or any selected line is already inside a section.
   const addCopySection = () => {
     const input = inputRef.current;
     if (!input) return;
     syncSelection(input);
     const current = historyRef.current.present;
-    edit(insertCopySection(current.text, current.start, current.end));
+    const created = createCopySection(current.text, current.sections ?? [], current.start, current.end);
     focusInput();
+    if (created) edit(created);
   };
 
   const handleKeyDown = (event) => {
@@ -302,12 +318,12 @@ const CodeEditor = forwardRef(function CodeEditor({ file, path, onSave, onClose,
       event.preventDefault();
       syncSelection(event.currentTarget);
       const current = historyRef.current.present;
-      edit(indentSelection(current.text, current.start, current.end, { outdent: event.shiftKey, indent: '    ' }));
+      commit(indentSelection(current.text, current.start, current.end, { outdent: event.shiftKey, indent: '    ' }));
     } else if (event.key === 'Enter' && !modifier && !event.altKey) {
       event.preventDefault();
       syncSelection(event.currentTarget);
       const current = historyRef.current.present;
-      edit(insertLineBreak(current.text, current.start, current.end));
+      commit(insertLineBreak(current.text, current.start, current.end));
     }
   };
 
@@ -405,13 +421,14 @@ const CodeEditor = forwardRef(function CodeEditor({ file, path, onSave, onClose,
         {wrap && <div className="editor-wrap-measure" ref={mirrorRef} aria-hidden="true" style={{ width: wrapWidth }}>{lines.map((line, index) => <div key={index}>{line || '\u200b'}</div>)}</div>}
         {sections.length > 0 && <div className="editor-section-layer" ref={layerRef}>
           <div className="editor-section-layer-inner" style={{ height: lineTops[lineTops.length - 1] + 32 }}>
-            {/* The tag lines stay in the file but are painted over. A tag shows again while the caret is on it, so it can be edited. */}
-            {sections.flatMap((section) => [section.start, section.end].filter((row) => row !== cursorRow).map((row) => <div key={`cover-${row}`} className="editor-section-cover" aria-hidden="true" style={{ top: 16 + lineTops[row], height: lineTops[row + 1] - lineTops[row] }} />))}
-            {sections.map((section) => <div key={section.start} className="editor-section-box" style={{ top: 16 + lineTops[section.start], height: lineTops[section.end + 1] - lineTops[section.start] }}>
-              <button type="button" className={`editor-copy-section${copiedSection === section.start ? ' copied' : ''}`} disabled={!section.code}
-                aria-label={section.code ? `Copy section, lines ${section.start + 2} to ${section.end}` : 'Copy section (empty)'} title={section.code ? 'Copy this section' : 'This section is empty'}
-                onMouseDown={(event) => event.preventDefault()} onClick={() => copySection(section)}>{copiedSection === section.start ? '✓' : 'c'}</button>
-            </div>)}
+            {sections.map((section) => {
+              const empty = lines.slice(section.start, section.end + 1).every((line) => !line);
+              return <div key={section.start} className="editor-section-box" style={{ top: 16 + lineTops[section.start], height: lineTops[section.end + 1] - lineTops[section.start] }}>
+                <button type="button" className={`editor-copy-section${copiedSection === section.start ? ' copied' : ''}`} disabled={empty}
+                  aria-label={empty ? 'Copy section (empty)' : `Copy section, lines ${section.start + 1} to ${section.end + 1}`} title={empty ? 'Type in this section, then copy it' : 'Copy this section'}
+                  onMouseDown={(event) => event.preventDefault()} onClick={() => copySection(section)}>{copiedSection === section.start ? '✓' : 'C'}</button>
+              </div>;
+            })}
           </div>
         </div>}
       </div>
@@ -426,7 +443,6 @@ const CodeEditor = forwardRef(function CodeEditor({ file, path, onSave, onClose,
     </div>
     <div className="editor-status-bar">
       <span className={dirty ? 'editor-unsaved-status' : 'editor-saved-status'} role="status">{dirty ? 'Unsaved changes' : 'Saved'}</span>
-      {orphans.length > 0 && <span className="editor-section-warning" title={`Unmatched copy-sec tag on line ${orphans[0] + 1}. Add the matching opening or closing tag.`}>Unmatched copy-sec tag</span>}
       <span className="editor-status-spacer" />
       <span>Ln {cursorLines.length}, Col {cursorLines[cursorLines.length - 1].length + 1}</span>
       <span>{lines.length} {lines.length === 1 ? 'line' : 'lines'}</span>

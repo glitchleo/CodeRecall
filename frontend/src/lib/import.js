@@ -1,6 +1,7 @@
 import { validateStoredNodes } from './library.js';
 import { cleanTagName, decodeLibrary, encodeLibrary } from './tags.js';
 import { normalizeNotes, validNoteText, validateDescriptionFormat } from './notes.js';
+import { copySectionProblem, sanitizeCopySections } from './copySections.js';
 
 export const MAX_IMPORT_BYTES = 4 * 1024 * 1024;
 export const MAX_IMPORT_ITEMS = 5000;
@@ -70,7 +71,7 @@ function normalizePortable(value) {
       if (siblings.has(nameKey(name))) fail('Two items in the same folder have this name. Names are matched without capitalization.', path);
       siblings.add(nameKey(name));
       const common = ['type', 'name', 'description', 'notes', 'tags', 'iconId', 'starred'];
-      checkFields(entry, [...common, ...(entry.type === 'folder' ? ['children'] : ['content', 'descriptionFormat'])], path);
+      checkFields(entry, [...common, ...(entry.type === 'folder' ? ['children'] : ['content', 'descriptionFormat', 'copySections'])], path);
       const next = { type: entry.type, name };
       if (owns(entry, 'description') && owns(entry, 'notes')) fail('Use description or notes, not both.', path);
       if (owns(entry, 'description') || owns(entry, 'notes')) {
@@ -96,6 +97,11 @@ function normalizePortable(value) {
       if (entry.type === 'file') {
         if (!owns(entry, 'content') || typeof entry.content !== 'string') fail('Files require a content string, including "" for an empty file.', path);
         next.content = entry.content;
+        if (owns(entry, 'copySections')) {
+          const problem = copySectionProblem(entry.copySections, entry.content);
+          if (problem) fail(problem, path);
+          next.copySections = entry.copySections.map(({ startLine, endLine }) => ({ startLine, endLine }));
+        }
       } else {
         if (owns(entry, 'children') && !Array.isArray(entry.children)) fail('Folder children must be a list of files and folders.', path);
         next.children = visit(entry.children ?? [], path, depth + 1);
@@ -139,7 +145,7 @@ function fromNativeBackup(value) {
       tags: (node.tagIds ?? []).map(id => catalog.get(id)),
       ...(owns(node, 'iconId') ? { iconId: node.iconId } : {}),
       starred: node.starred,
-      ...(node.type === 'file' ? { content: node.content ?? '' } : { children: visit(node.id, depth + 1) }),
+      ...(node.type === 'file' ? { content: node.content ?? '', ...(owns(node, 'copySections') ? { copySections: sanitizeCopySections(node.copySections, node.content ?? '') } : {}) } : { children: visit(node.id, depth + 1) }),
     }));
   };
   return normalizePortable({ format: IMPORT_FORMAT, version: 1, items: visit(null, 0), tags: [...catalog.values()] });
@@ -224,6 +230,7 @@ export function planLibraryImport(library, payload, parentId = null) {
           id: makeId(nodeIds, 'item'), type: entry.type, name: entry.name, parentId: destinationId,
           createdAt: timestamp, updatedAt: timestamp, starred: entry.starred ?? false,
           ...(entry.type === 'file' ? { content: entry.content, sizeBytes: encoder.encode(entry.content).byteLength } : {}),
+          ...(entry.type === 'file' && entry.copySections?.length ? { copySections: entry.copySections } : {}),
           ...(owns(entry, 'description') ? { description: entry.description } : {}),
           ...(owns(entry, 'descriptionFormat') ? { descriptionFormat: entry.descriptionFormat } : {}),
           ...(owns(entry, 'iconId') ? { iconId: entry.iconId } : {}),
@@ -239,6 +246,9 @@ export function planLibraryImport(library, payload, parentId = null) {
           if ((existing.content ?? '') !== entry.content) patch.content = entry.content;
           const sizeBytes = encoder.encode(entry.content).byteLength;
           if ((existing.sizeBytes ?? 0) !== sizeBytes) patch.sizeBytes = sizeBytes;
+          // New code without its own ranges must not keep ranges that pointed into the old code.
+          const sections = owns(entry, 'copySections') ? entry.copySections : patch.content !== undefined ? [] : sanitizeCopySections(existing.copySections, entry.content);
+          if (JSON.stringify(sanitizeCopySections(existing.copySections, existing.content ?? '')) !== JSON.stringify(sections)) patch.copySections = sections.length ? sections : undefined;
         }
         if (owns(entry, 'description')) {
           if ((existing.description ?? '') !== entry.description) patch.description = entry.description;
@@ -250,6 +260,7 @@ export function planLibraryImport(library, payload, parentId = null) {
         if (Object.keys(patch).length) {
           node = { ...existing, ...patch, updatedAt: timestamp };
           if (node.descriptionFormat === undefined) delete node.descriptionFormat;
+          if (node.copySections === undefined) delete node.copySections;
           nodes[nodeIndexes.get(existing.id)] = node;
           action = 'update';
           summary[entry.type === 'file' ? 'filesUpdated' : 'foldersUpdated'] += 1;

@@ -334,14 +334,21 @@ input::placeholder { color: #a0a0a0; opacity: 1; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
 }
-/* Navigation menu: the CodeRecall title stays put; pressing it hides or shows everything under it */
-.brand-toggle { display: flex; align-items: center; gap: 9px; flex: 0 1 auto; min-width: 0; padding: 0 6px 0 0; border-radius: 3px; font: inherit; }
+/* Top bar across the whole window. The CodeRecall logo lives here and opens or closes the left menu. */
+.app-shell { grid-template-rows: 46px minmax(0, 1fr); }
+.app-topbar { grid-column: 1 / -1; grid-row: 1; z-index: 5; }
+.sidebar { grid-column: 1; grid-row: 2; }
+.workspace { grid-column: 2; grid-row: 2; }
+.brand-toggle { display: inline-flex; align-items: center; gap: 9px; flex: 0 0 auto; min-height: 32px; padding: 0 10px 0 6px; border-radius: 3px; color: #eee; font-size: 13px; font-weight: 500; }
 .brand-toggle:hover { background: #2c2c2c; }
-.brand-toggle::after { content: ''; flex: 0 0 auto; width: 5px; height: 5px; margin-left: 2px; border: solid #8a8a8a; border-width: 0 1.5px 1.5px 0; transform: translateY(-1px) rotate(45deg); transition: transform .15s; }
-.sidebar-collapsed .brand-toggle::after { transform: rotate(-45deg); }
+.brand-toggle:focus-visible { outline: 1px solid #6bbafa; outline-offset: -2px; }
+.brand-toggle::after { content: ''; flex: 0 0 auto; width: 6px; height: 6px; margin-left: 3px; border: solid #8a8a8a; border-width: 0 0 1.5px 1.5px; transform: rotate(45deg); transition: transform .18s; }
+.sidebar-collapsed .brand-toggle::after { transform: rotate(-135deg); }
 @media (min-width: 851px) {
-  .app-shell.sidebar-collapsed { grid-template-columns: 148px minmax(0, 1fr); }
-  .sidebar-collapsed .roots-section, .sidebar-collapsed .starred-section { display: none; }
+  .app-shell { transition: grid-template-columns .18s ease; }
+  /* Collapsed: the menu column shrinks to nothing and the page fills the space */
+  .app-shell.sidebar-collapsed { grid-template-columns: 0px minmax(0, 1fr); }
+  .sidebar-collapsed .sidebar { visibility: hidden; overflow: hidden; padding-left: 0; padding-right: 0; border-right-width: 0; }
   /* Shorter path box, longer search box (explorer and Find) */
   .address-bar { flex: 0 1 300px; }
   .address-bar:focus-within { flex-basis: 460px; }

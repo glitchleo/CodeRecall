@@ -326,7 +326,7 @@ export default function App() {
 
   // The CodeRecall title always stays put; pressing it hides or shows everything under it.
   function toggleSidebar() {
-    if (window.matchMedia('(max-width: 850px)').matches) { setSidebarOpen(false); return; }
+    if (window.matchMedia('(max-width: 850px)').matches) { setSidebarOpen(value => !value); return; }
     setSidebarCollapsed(value => {
       try { localStorage.setItem('coderecall.sidebar.collapsed', value ? '0' : '1'); } catch { /* the preference just won't persist */ }
       return !value;
@@ -356,9 +356,9 @@ export default function App() {
     else setEditorFileId(null);
   }
 
-  function saveEditorContent(content, notes) {
+  function saveEditorContent(content, notes, copySections) {
     try {
-      const next = updateFileDocument(nodes, editorFileId, content, notes);
+      const next = updateFileDocument(nodes, editorFileId, content, notes, copySections);
       // Confirm the write before reporting a save; keep the editor dirty if storage is full.
       localStorage.setItem(STORAGE_KEY, JSON.stringify(encodeLibrary(next, tags)));
       setNodes(next); setStorageError(false);
@@ -571,8 +571,12 @@ export default function App() {
 
   return <div className={`app-shell view-${preferences.density} mode-${preferences.mode}${sidebarOpen ? ' sidebar-visible' : ''}${sidebarCollapsed ? ' sidebar-collapsed' : ''}`}>
     {sidebarOpen && <button className="sidebar-scrim" aria-label="Close navigation" onClick={() => setSidebarOpen(false)} />}
+    <header className="mode-bar app-topbar">
+      <button type="button" className="brand-toggle" aria-expanded={window.matchMedia('(max-width: 850px)').matches ? sidebarOpen : !sidebarCollapsed} title={sidebarCollapsed ? 'Show navigation' : 'Hide navigation'} onClick={toggleSidebar}><span className="brand-symbol">{'</>'}</span><span>CodeRecall</span></button>
+      {!editorFile && <><div className="mode-switch" aria-label="Library mode"><button className={preferences.mode === 'find' ? 'active' : ''} aria-pressed={preferences.mode === 'find'} onClick={() => setPreferences(previous => ({ ...previous, mode: 'find' }))}><SearchIcon name="grid" size={15} />Find code</button><button className={preferences.mode === 'explorer' ? 'active' : ''} aria-pressed={preferences.mode === 'explorer'} onClick={() => setPreferences(previous => ({ ...previous, mode: 'explorer' }))}><Icon name="list" size={15} />Explorer</button></div><Suspense fallback={<span className="cloud-loading">Account & backup</span>}><CloudLibrary library={library} onLoad={loadCloudLibrary} /></Suspense></>}
+    </header>
     <aside className="sidebar" aria-label="Explorer navigation">
-      <div className="sidebar-brand"><button type="button" className="brand-toggle" aria-expanded={!sidebarCollapsed} title={sidebarCollapsed ? 'Show navigation' : 'Hide navigation'} onClick={toggleSidebar}><span className="brand-symbol">{'</>'}</span><span>CodeRecall</span></button><button className="icon-button sidebar-close" aria-label="Close navigation" onClick={() => setSidebarOpen(false)}><Icon name="close" /></button></div>
+      <button className="icon-button sidebar-close" aria-label="Close navigation" onClick={() => setSidebarOpen(false)}><Icon name="close" /></button>
       <nav className="roots-section" aria-label="Roots">{ROOTS.map(root => <button key={root.id}
         className={`sidebar-link ${folderId === root.parentId && !searching ? 'active' : ''} ${dropTarget === root.parentId ? 'drop-target' : ''}`}
         onClick={() => navigate(root.parentId)} onDragOver={event => dragOver(event, root.parentId)} onDragLeave={() => setDropTarget(undefined)} onDrop={event => drop(event, root.parentId)}
@@ -593,7 +597,6 @@ export default function App() {
 
     <main className="workspace" aria-label="File explorer">
       {editorFile ? <CodeEditor key={editorFile.id} ref={editorRef} file={editorFile} path={editorPath} persistenceError={storageError} onSave={saveEditorContent} onClose={closeEditor} resolveLink={resolveLink} onOpenLink={followNoteLink} backLabel={trailPrevious ? `Back to ${trailPrevious.name}` : 'Back to files'} tags={tags} onToggleTag={id => toggleFileTag(editorFile.id, id)} onCreateTag={name => createCustomTag(name, editorFile.id)} /> : <>
-      <header className="mode-bar"><button className="icon-button mobile-navigation-toggle" aria-label="Open navigation" aria-expanded={sidebarOpen} onClick={() => setSidebarOpen(value => !value)}><Icon name="list" /></button><div className="mode-switch" aria-label="Library mode"><button className={preferences.mode === 'find' ? 'active' : ''} aria-pressed={preferences.mode === 'find'} onClick={() => setPreferences(previous => ({ ...previous, mode: 'find' }))}><SearchIcon name="grid" size={15} />Find code</button><button className={preferences.mode === 'explorer' ? 'active' : ''} aria-pressed={preferences.mode === 'explorer'} onClick={() => setPreferences(previous => ({ ...previous, mode: 'explorer' }))}><Icon name="list" size={15} />Explorer</button></div><Suspense fallback={<span className="cloud-loading">Account & backup</span>}><CloudLibrary library={library} onLoad={loadCloudLibrary} /></Suspense></header>
       {preferences.mode === 'find' ? <SearchMode nodes={nodes} tags={tags} query={query} onQuery={setQuery} searchRef={searchRef} tagFilter={tagFilter} onToggleFilter={toggleTagFilter} onCreateTag={createCustomTag} onClearFilters={() => setTagFilter([])} folderId={folderId} breadcrumb={breadcrumb} onNavigate={navigate} onBack={() => goHistory(-1)} canBack={history.index > 0} onEdit={openItem} onCreate={beginCreate} onCopy={copyCode} onSaveMetadata={saveMetadata} onToggleTag={toggleFileTag} storageError={storageError} resolveLink={resolveLink} /> : <>
       <div className="command-bar" role="toolbar" aria-label="File actions">
         <div className="command-group"><button className="toolbar-button" aria-label="New" aria-haspopup="menu" aria-expanded={menu?.kind === 'new'} onClick={event => showToolbarMenu(event, 'new')} disabled={!canCreate}><Icon name="plus" /><span>New</span><Icon name="down" size={11} /></button></div>
